@@ -55,16 +55,22 @@ async function crawlerAgent(urls: string[]): Promise<Array<{ url: string; conten
     const batch = urls.slice(i, i + BATCH_SIZE)
     const batchResults = await Promise.all(batch.map(async (url) => {
       try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 15000)
+
         const res = await fetch(url, {
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "el-GR,el;q=0.9,en;q=0.8",
           },
-          signal: AbortSignal.timeout(15000),
-        })
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer))
 
-        if (!res.ok) return { url, content: "" }
+        if (!res.ok) {
+          console.error(`Fetch failed for ${url}: HTTP ${res.status}`)
+          return { url, content: "" }
+        }
 
         const html = await res.text()
         const text = html
@@ -86,7 +92,7 @@ async function crawlerAgent(urls: string[]): Promise<Array<{ url: string; conten
         return { url, content: "" }
       }
     }))
-    results.push(...batchResults.filter(r => r.content.length > 100))
+    results.push(...batchResults.filter(r => r.content.length > 20))
   }
 
   return results
@@ -104,16 +110,29 @@ async function qualifierAgent(
     const batch = pages.slice(i, i + BATCH_SIZE)
     const batchLeads = await Promise.all(batch.map(async (page) => {
       try {
-        const mandatoryFields = "\n\nALWAYS include these fields for every lead: company_name, contact_name, contact_role, email, phone, website, location, source_url"
+        const mandatoryFields = "\n\nCRITICAL: You MUST respond with ONLY a valid JSON array. No explanation, no markdown, no code blocks. Just the raw JSON array starting with [ and ending with ]. Every lead must include: company_name, contact_name, contact_role, email, phone, website, location, source_url. If a field is unknown use empty string."
         const raw = await callAI(
           scraperConfig.model,
           scraperConfig.system_prompt + mandatoryFields,
           `URL: ${page.url}\n\nContent:\n${page.content}`
         )
 
-        const jsonMatch = raw.match(/\[[\s\S]*\]/)
-        if (!jsonMatch) return []
-        const leads = JSON.parse(jsonMatch[0]) as Array<Record<string, unknown>>
+        // Try to extract JSON array from response — handle markdown code blocks too
+        let jsonStr = raw
+        const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+        if (codeBlock) jsonStr = codeBlock[1]
+        const arrayMatch = jsonStr.match(/\[[\s\S]*\]/)
+        if (!arrayMatch) {
+          // If AI returned a single object, wrap it
+          const objMatch = jsonStr.match(/\{[\s\S]*\}/)
+          if (!objMatch) {
+            console.error("No JSON found in response:", raw.substring(0, 200))
+            return []
+          }
+          const lead = JSON.parse(objMatch[0]) as Record<string, unknown>
+          return [{ ...lead, source_url: lead.source_url || page.url }]
+        }
+        const leads = JSON.parse(arrayMatch[0]) as Array<Record<string, unknown>>
         return leads.map(lead => ({ ...lead, source_url: lead.source_url || page.url }))
       } catch (e) {
         console.error("QualifierAgent error:", e)
@@ -218,12 +237,6 @@ Deno.serve(async (req) => {
         send(controller, "step", { step: 4, name: "QualifierAgent", status: "running", message: "Extracting lead candidates with AI..." })
         const scraperConfig = getConfig("scraper")
         const extractedLeads = await qualifierAgent(pages, scraperConfig as { model: string; system_prompt: string })
-        if (extractedLeads.length === 0) {
-          send(controller, "error", { message: "No leads extracted. Try adjusting your scraper prompt in Settings." })
-          await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No leads extracted" }).eq("id", jobId)
-          controller.close()
-          return
-        }
         send(controller, "step", { step: 4, name: "QualifierAgent", status: "done", message: `Extracted ${extractedLeads.length} lead candidate${extractedLeads.length !== 1 ? "s" : ""}` })
 
         // Step 5: Enrichment (scraper data only)
