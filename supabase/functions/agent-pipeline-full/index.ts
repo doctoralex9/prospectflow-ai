@@ -46,47 +46,69 @@ function send(controller: ReadableStreamDefaultController, event: string, data: 
   controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
 }
 
-// CrawlerAgent — plain fetch + HTML stripping (no external API needed)
-async function crawlerAgent(urls: string[]): Promise<Array<{ url: string; content: string }>> {
+async function fetchWithFirecrawl(url: string, apiKey: string): Promise<string> {
+  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url, formats: ["markdown"] }),
+  })
+  if (!res.ok) throw new Error(`Firecrawl HTTP ${res.status}`)
+  const data = await res.json()
+  return (data?.data?.markdown as string) || ""
+}
+
+async function fetchWithPlainFetch(url: string): Promise<string> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "el-GR,el;q=0.9,en;q=0.8",
+    },
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer))
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const html = await res.text()
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+// CrawlerAgent — tries Firecrawl (JS-rendered sites) if key provided, falls back to plain fetch
+async function crawlerAgent(urls: string[], firecrawlKey?: string): Promise<Array<{ url: string; content: string }>> {
   const results: Array<{ url: string; content: string }> = []
   const BATCH_SIZE = 5
 
   for (let i = 0; i < urls.length; i += BATCH_SIZE) {
     const batch = urls.slice(i, i + BATCH_SIZE)
     const batchResults = await Promise.all(batch.map(async (url) => {
-      try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 15000)
+      let content = ""
 
-        const res = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "el-GR,el;q=0.9,en;q=0.8",
-          },
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timer))
-
-        if (!res.ok) {
-          console.error(`Fetch failed for ${url}: HTTP ${res.status}`)
-          return { url, content: "" }
+      if (firecrawlKey) {
+        try {
+          content = await fetchWithFirecrawl(url, firecrawlKey)
+          if (content.length > 20) return { url, content: content.substring(0, 25000) }
+          console.warn(`Firecrawl returned empty for ${url}, falling back`)
+        } catch (e) {
+          console.error(`Firecrawl failed for ${url}:`, e)
         }
+      }
 
-        const html = await res.text()
-        const text = html
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-          .replace(/<!--[\s\S]*?-->/g, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/\s+/g, " ")
-          .trim()
-          .substring(0, 25000)
-
-        return { url, content: text }
+      try {
+        content = await fetchWithPlainFetch(url)
+        return { url, content: content.substring(0, 25000) }
       } catch (e) {
         console.error(`Crawler failed for ${url}:`, e)
         return { url, content: "" }
@@ -164,6 +186,8 @@ Deno.serve(async (req) => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || undefined
+
   let campaignId: string
   let userId: string
   let urls: string[]
@@ -220,8 +244,8 @@ Deno.serve(async (req) => {
         send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
 
         // Step 2: Crawler
-        send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""}...` })
-        const pages = await crawlerAgent(urls)
+        send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
+        const pages = await crawlerAgent(urls, firecrawlKey)
         if (pages.length === 0) {
           send(controller, "error", { message: "Could not scrape any pages. Check that the URLs are publicly accessible." })
           await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped" }).eq("id", jobId)
