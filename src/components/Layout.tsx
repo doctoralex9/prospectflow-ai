@@ -30,7 +30,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="bg-primary rounded-lg p-1.5">
               <Zap className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="font-bold text-lg">LeadFlow AI</span>
+            <span className="font-bold text-lg">PROSPECTFLOW AI</span>
           </div>
         </div>
         <nav className="flex-1 p-4 space-y-1">
