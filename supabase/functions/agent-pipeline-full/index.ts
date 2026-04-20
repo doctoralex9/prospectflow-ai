@@ -191,14 +191,16 @@ Deno.serve(async (req) => {
   let campaignId: string
   let userId: string
   let urls: string[]
+  let rawContent: string | undefined
 
   try {
     const body = await req.json()
     campaignId = body.campaign_id
     userId = body.user_id
     urls = (body.urls as string[]) || []
+    rawContent = body.rawContent as string | undefined
     if (!campaignId) throw new Error("campaign_id required")
-    if (!urls.length) throw new Error("urls array required")
+    if (!rawContent && !urls.length) throw new Error("urls or rawContent required")
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 400,
@@ -231,7 +233,7 @@ Deno.serve(async (req) => {
   // Create scrape job
   const { data: scrapeJob } = await supabase
     .from("scrape_jobs")
-    .insert({ campaign_id: campaignId, target_url: urls.join(", "), status: "running" })
+    .insert({ campaign_id: campaignId, target_url: urls.length ? urls.join(", ") : "pasted-content", status: "running" })
     .select()
     .single()
 
@@ -240,19 +242,25 @@ Deno.serve(async (req) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Step 1: URLs provided by user (no discovery needed)
-        send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
+        // Step 1: Input ready
+        send(controller, "step", { step: 1, name: "URLInput", status: "done", message: rawContent ? "Content paste mode — skipping crawler" : `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
 
-        // Step 2: Crawler
-        send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
-        const pages = await crawlerAgent(urls, firecrawlKey)
-        if (pages.length === 0) {
-          send(controller, "error", { message: "Could not scrape any pages. Check that the URLs are publicly accessible." })
-          await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped" }).eq("id", jobId)
-          controller.close()
-          return
+        // Step 2: Crawler (skipped if rawContent provided)
+        let pages: Array<{ url: string; content: string }>
+        if (rawContent) {
+          pages = [{ url: "pasted-content", content: rawContent }]
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: "Using pasted content directly" })
+        } else {
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
+          pages = await crawlerAgent(urls, firecrawlKey)
+          if (pages.length === 0) {
+            send(controller, "error", { message: "Could not scrape any pages. Check that the URLs are publicly accessible." })
+            await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped" }).eq("id", jobId)
+            controller.close()
+            return
+          }
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: `Scraped ${pages.length} page${pages.length !== 1 ? "s" : ""} successfully` })
         }
-        send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: `Scraped ${pages.length} page${pages.length !== 1 ? "s" : ""} successfully` })
 
         // Step 3: Filter (pass-through)
         send(controller, "step", { step: 3, name: "FilterAgent", status: "done", message: `${pages.length} page${pages.length !== 1 ? "s" : ""} passed to extraction` })

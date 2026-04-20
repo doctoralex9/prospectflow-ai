@@ -52,6 +52,8 @@ export default function LeadsPage() {
   const [savingNotes, setSavingNotes] = useState(false)
   const [urlInput, setUrlInput] = useState("")
   const [showUrlInput, setShowUrlInput] = useState(false)
+  const [inputMode, setInputMode] = useState<"url" | "paste">("url")
+  const [pasteContent, setPasteContent] = useState("")
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -117,8 +119,12 @@ export default function LeadsPage() {
     }
 
     const urls = parseUrls(urlInput)
-    if (urls.length === 0) {
+    if (inputMode === "url" && urls.length === 0) {
       toast({ title: "No valid URLs", description: "Paste at least one URL starting with http:// or https://", variant: "destructive" })
+      return
+    }
+    if (inputMode === "paste" && !pasteContent.trim()) {
+      toast({ title: "No content", description: "Paste some text content first", variant: "destructive" })
       return
     }
 
@@ -138,7 +144,11 @@ export default function LeadsPage() {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
       },
-      body: JSON.stringify({ campaign_id: selectedCampaignId, user_id: user?.id, urls }),
+      body: JSON.stringify(
+        inputMode === "url"
+          ? { campaign_id: selectedCampaignId, user_id: user?.id, urls }
+          : { campaign_id: selectedCampaignId, user_id: user?.id, rawContent: pasteContent }
+      ),
       signal: abortRef.current.signal,
     }).then(async (response) => {
       if (!response.ok) {
@@ -267,43 +277,67 @@ export default function LeadsPage() {
 
       {/* URL Input Card */}
       <Card className="border-dashed">
-        <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowUrlInput(p => !p)}>
+        <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Link className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">
-                Paste URLs to scrape
-                {parsedUrlCount > 0 && !pipelineRunning && (
-                  <span className="ml-2 text-primary font-normal">({parsedUrlCount} URL{parsedUrlCount !== 1 ? "s" : ""} ready)</span>
-                )}
-              </CardTitle>
+            <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+              <button
+                onClick={() => { setInputMode("url"); setShowUrlInput(true) }}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded font-medium transition-colors ${inputMode === "url" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <Link className="h-3.5 w-3.5" /> By URL
+              </button>
+              <button
+                onClick={() => { setInputMode("paste"); setShowUrlInput(true) }}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded font-medium transition-colors ${inputMode === "paste" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                Paste Content
+              </button>
             </div>
-            {showUrlInput ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            <button onClick={() => setShowUrlInput(p => !p)} className="text-muted-foreground hover:text-foreground">
+              {showUrlInput ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
           </div>
         </CardHeader>
         {showUrlInput && (
           <CardContent className="space-y-3">
-            <Textarea
-              value={urlInput}
-              onChange={e => setUrlInput(e.target.value)}
-              placeholder={"https://www.e-food.gr/athens/catering\nhttps://www.skroutz.gr/restaurants/athens\n\nOne URL per line, or comma separated"}
-              rows={4}
-              className="font-mono text-xs resize-none"
-              disabled={pipelineRunning}
-            />
+            {inputMode === "url" ? (
+              <Textarea
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder={"https://www.e-food.gr/athens/catering\nhttps://www.skroutz.gr/restaurants/athens\n\nOne URL per line, or comma separated"}
+                rows={4}
+                className="font-mono text-xs resize-none"
+                disabled={pipelineRunning}
+              />
+            ) : (
+              <Textarea
+                value={pasteContent}
+                onChange={e => setPasteContent(e.target.value)}
+                placeholder={"Open any page in your browser → Ctrl+A → Ctrl+C → paste here.\n\nWorks on Google Maps, directories, any website."}
+                rows={6}
+                className="text-xs resize-none"
+                disabled={pipelineRunning}
+              />
+            )}
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                One URL per line • up to 20 URLs per run • public pages only
+                {inputMode === "url"
+                  ? "One URL per line • up to 20 URLs per run • public pages only"
+                  : "Paste raw text from any page • AI will extract leads from it"}
               </p>
               {pipelineRunning ? (
                 <Button variant="outline" onClick={stopPipeline} size="sm">
                   <X className="h-3.5 w-3.5 mr-1.5" /> Stop
                 </Button>
               ) : (
-                <Button onClick={startPipeline} disabled={!selectedCampaignId || parsedUrlCount === 0} size="sm">
+                <Button
+                  onClick={startPipeline}
+                  disabled={!selectedCampaignId || (inputMode === "url" ? parsedUrlCount === 0 : !pasteContent.trim())}
+                  size="sm"
+                >
                   <Play className="h-3.5 w-3.5 mr-1.5" />
                   Run Pipeline
-                  {parsedUrlCount > 0 && ` (${parsedUrlCount})`}
+                  {inputMode === "url" && parsedUrlCount > 0 && ` (${parsedUrlCount})`}
                 </Button>
               )}
             </div>
