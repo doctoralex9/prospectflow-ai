@@ -11,8 +11,70 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Plus, Trash2, Edit2, Loader2, Database } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Database, Sparkles } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
+
+function buildAgentConfigs(product: string, target: string, language: string) {
+  const langLine =
+    language === "greek" ? "Γράψε το μήνυμα στα Ελληνικά."
+    : language === "english" ? "Write the message in English."
+    : "Write in Greek if the business name sounds Greek, otherwise English."
+
+  return [
+    {
+      agent_type: "scraper",
+      model: "gpt-4o-mini",
+      system_prompt: `Extract businesses matching this profile: ${target}.
+
+For each business extract:
+- company_name: Business name
+- industry: Type of business
+- location: City or area
+- contact_name: Owner or manager name if visible
+- email: Email address if visible
+- phone: Phone number if visible
+- website: Website URL if visible
+- source_url: Leave as empty string
+
+Include businesses even with only a name and location — contact data is not required.
+Ignore aggregators and directory websites — only real individual businesses.
+Return ONLY a valid JSON array. No explanations.`,
+    },
+    {
+      agent_type: "qualifier",
+      model: "gpt-4o-mini",
+      system_prompt: `Decide if this business matches: ${target}.
+ACCEPT if it clearly fits.
+REJECT if it's a large chain, unrelated business, or aggregator site.
+Return JSON: {"qualified": true/false, "reason": "..."}`,
+    },
+    {
+      agent_type: "enrichment",
+      model: "gpt-4o-mini",
+      system_prompt: `Organize existing contact data into structured format.
+STRICTLY FORBIDDEN: do not invent, guess, or hallucinate any email, phone, or contact name.
+Use ONLY data already present in the input.
+Return JSON: {"name": "", "role": "", "email": "", "phone": "", "website": "", "source": ""}
+If no real data exists, return empty strings.`,
+    },
+    {
+      agent_type: "content",
+      model: "gpt-4o",
+      system_prompt: `Write a short personalized B2B outreach message.
+You are selling: ${product}
+You are writing to: ${target}
+
+Structure:
+1. Address the business by name
+2. One sentence about their specific situation or pain point that your offer solves
+3. One sentence about what you offer and the concrete benefit
+4. CTA: propose a quick call or ask if they want to know more
+
+Tone: Friendly, direct, human — not a template, not salesy. 4 sentences max.
+${langLine}`,
+    },
+  ]
+}
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -32,6 +94,9 @@ export default function SettingsPage() {
     perplexity_default_query: "",
     crawl_keywords: "",
   })
+
+  // Wizard state
+  const [wizard, setWizard] = useState({ product: "", target: "", language: "greek" })
 
   useEffect(() => {
     if (user) loadCampaigns()
@@ -101,31 +166,43 @@ export default function SettingsPage() {
     setSaving(false)
   }
 
-  async function createCampaign() {
+  async function createCampaignFromWizard() {
+    if (!wizard.product.trim() || !wizard.target.trim()) return
     setSaving(true)
-    const { data, error } = await supabase
+
+    const { data: campaign, error: campErr } = await supabase
       .from("campaigns")
       .insert({
         user_id: user!.id,
-        name: campaignForm.name,
-        description: campaignForm.description || null,
-        target_site: campaignForm.target_site,
-        icp_description: campaignForm.icp_description,
-        perplexity_default_query: campaignForm.perplexity_default_query || null,
-        crawl_keywords: campaignForm.crawl_keywords
-          ? campaignForm.crawl_keywords.split(",").map(k => k.trim()).filter(Boolean)
-          : null,
+        name: `${wizard.target} — ${wizard.product}`,
+        description: `Find ${wizard.target} and pitch them: ${wizard.product}.`,
+        target_site: "Google Maps / paste from any source",
+        icp_description: wizard.target,
+        is_active: true,
       })
       .select()
       .single()
-    if (error) {
-      toast({ title: "Create failed", description: error.message, variant: "destructive" })
-    } else if (data) {
-      toast({ title: "Campaign created" })
+
+    if (campErr || !campaign) {
+      toast({ title: "Create failed", description: campErr?.message, variant: "destructive" })
+      setSaving(false)
+      return
+    }
+
+    const configs = buildAgentConfigs(wizard.product, wizard.target, wizard.language).map(c => ({
+      campaign_id: campaign.id,
+      ...c,
+    }))
+
+    const { error: configErr } = await supabase.from("agent_configs").insert(configs)
+    if (configErr) {
+      toast({ title: "Agent configs failed", description: configErr.message, variant: "destructive" })
+    } else {
+      toast({ title: "Campaign created!", description: "AI prompts generated automatically." })
       setShowNewCampaign(false)
-      setCampaignForm({ name: "", description: "", target_site: "", icp_description: "", perplexity_default_query: "", crawl_keywords: "" })
+      setWizard({ product: "", target: "", language: "greek" })
       await loadCampaigns()
-      setSelectedCampaignId(data.id)
+      setSelectedCampaignId(campaign.id)
     }
     setSaving(false)
   }
@@ -150,15 +227,12 @@ export default function SettingsPage() {
   }
 
   async function loadSampleData() {
-    if (!confirm("This will create the Athens Corporate Catering Leads demo campaign. Continue?")) return
+    if (!confirm("This will create the Greek Hotel Direct Booking Leads demo campaign. Continue?")) return
     setSeedingDemo(true)
 
     const { data: campaign, error: campErr } = await supabase
       .from("campaigns")
-      .insert({
-        user_id: user!.id,
-        ...DEMO_CAMPAIGN,
-      })
+      .insert({ user_id: user!.id, ...DEMO_CAMPAIGN })
       .select()
       .single()
 
@@ -179,11 +253,10 @@ export default function SettingsPage() {
     if (configErr) {
       toast({ title: "Agent configs failed", description: configErr.message, variant: "destructive" })
     } else {
-      toast({ title: "Demo campaign loaded!", description: "Athens Corporate Catering Leads is ready." })
+      toast({ title: "Demo campaign loaded!", description: "Greek Hotel Direct Booking Leads is ready." })
       await loadCampaigns()
       setSelectedCampaignId(campaign.id)
     }
-
     setSeedingDemo(false)
   }
 
@@ -200,6 +273,8 @@ export default function SettingsPage() {
     }
   }
 
+  const wizardReady = wizard.product.trim().length > 2 && wizard.target.trim().length > 2
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -209,7 +284,7 @@ export default function SettingsPage() {
             {seedingDemo ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Database className="h-4 w-4 mr-2" />}
             Load Sample Data
           </Button>
-          <Button onClick={() => { setShowNewCampaign(true); setCampaignForm({ name: "", description: "", target_site: "", icp_description: "", perplexity_default_query: "", crawl_keywords: "" }) }}>
+          <Button onClick={() => { setShowNewCampaign(true); setWizard({ product: "", target: "", language: "greek" }) }}>
             <Plus className="h-4 w-4 mr-2" /> New Campaign
           </Button>
         </div>
@@ -271,7 +346,6 @@ export default function SettingsPage() {
                         />
                       </div>
                     </div>
-
                     <div className="space-y-2">
                       <Label>Description</Label>
                       <Textarea
@@ -280,7 +354,6 @@ export default function SettingsPage() {
                         rows={2}
                       />
                     </div>
-
                     <div className="space-y-2">
                       <Label>ICP Description</Label>
                       <Textarea
@@ -290,19 +363,6 @@ export default function SettingsPage() {
                         rows={2}
                       />
                     </div>
-
-                    <div className="space-y-2">
-                      <Label>Perplexity Query</Label>
-                      <Textarea
-                        value={campaignForm.perplexity_default_query}
-                        onChange={e => setCampaignForm(p => ({ ...p, perplexity_default_query: e.target.value }))}
-                        placeholder="Use | to separate multiple queries..."
-                        rows={3}
-                        className="font-mono text-xs"
-                      />
-                      <p className="text-xs text-muted-foreground">Separate multiple queries with | — each runs in parallel</p>
-                    </div>
-
                     <div className="space-y-2">
                       <Label>Crawl Keywords (comma-separated)</Label>
                       <Input
@@ -311,7 +371,6 @@ export default function SettingsPage() {
                         placeholder="keyword1, keyword2, ..."
                       />
                     </div>
-
                     <div className="flex gap-2 pt-2">
                       <Button onClick={saveCampaign} disabled={saving}>
                         {saving ? "Saving..." : "Save Campaign"}
@@ -351,43 +410,73 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* New Campaign Dialog */}
+      {/* New Campaign Wizard Dialog */}
       <Dialog open={showNewCampaign} onOpenChange={setShowNewCampaign}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>New Campaign</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              New Campaign
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+
+          <div className="space-y-5 py-1">
+            <p className="text-sm text-muted-foreground">
+              Answer 2 questions — the AI prompts are generated automatically.
+            </p>
+
             <div className="space-y-2">
-              <Label>Campaign Name *</Label>
+              <Label>What are you selling?</Label>
               <Input
-                value={campaignForm.name}
-                onChange={e => setCampaignForm(p => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. Athens Restaurant Leads"
+                value={wizard.product}
+                onChange={e => setWizard(p => ({ ...p, product: e.target.value }))}
+                placeholder="e.g. websites για ξενοδοχεία, social media management, λογιστικές υπηρεσίες"
+                autoFocus
               />
             </div>
+
             <div className="space-y-2">
-              <Label>Target Site *</Label>
+              <Label>Who are you targeting?</Label>
               <Input
-                value={campaignForm.target_site}
-                onChange={e => setCampaignForm(p => ({ ...p, target_site: e.target.value }))}
-                placeholder="Google Maps, LinkedIn, etc."
+                value={wizard.target}
+                onChange={e => setWizard(p => ({ ...p, target: e.target.value }))}
+                placeholder="e.g. ξενοδοχεία στην Ελλάδα, dentists in Athens, freelance photographers"
               />
             </div>
+
             <div className="space-y-2">
-              <Label>ICP Description *</Label>
-              <Textarea
-                value={campaignForm.icp_description}
-                onChange={e => setCampaignForm(p => ({ ...p, icp_description: e.target.value }))}
-                placeholder="Describe your ideal customer..."
-                rows={2}
-              />
+              <Label>Outreach language</Label>
+              <Select value={wizard.language} onValueChange={v => setWizard(p => ({ ...p, language: v }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="greek">Greek</SelectItem>
+                  <SelectItem value="english">English</SelectItem>
+                  <SelectItem value="auto">Auto (Greek name → Greek, otherwise English)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {wizardReady && (
+              <div className="rounded-lg bg-muted/60 border px-4 py-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground text-sm">Will be created:</p>
+                <p>Campaign: <span className="text-foreground font-medium">"{wizard.target} — {wizard.product}"</span></p>
+                <p>4 AI agents auto-configured (scraper, qualifier, enrichment, outreach)</p>
+              </div>
+            )}
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewCampaign(false)}>Cancel</Button>
-            <Button onClick={createCampaign} disabled={saving || !campaignForm.name || !campaignForm.target_site}>
-              {saving ? "Creating..." : "Create Campaign"}
+            <Button
+              onClick={createCampaignFromWizard}
+              disabled={saving || !wizardReady}
+            >
+              {saving
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating...</>
+                : <><Sparkles className="h-4 w-4 mr-2" /> Generate & Create</>
+              }
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5,7 +5,6 @@ AI-powered B2B lead generation platform. User pastes URLs or page content → 6-
 
 Target market: Greek B2B (restaurants, catering, lawyers, dentists, hotels).
 Distribution: TikTok demos → DM-based sales.
-Monetization: €97 one-time payment (not built yet — validating first).
 
 GitHub: https://github.com/doctoralex9/prospectflow-ai
 
@@ -121,6 +120,15 @@ Supabase Dashboard → Edge Functions → [function name] → Edit → paste cod
 
 ## Demo Campaign
 Settings → Load Sample Data → creates "Athens Corporate Catering Leads" with all 4 agent prompts pre-configured.
+
+---
+
+## Code Change Communication Rule
+Every time a code change is made, explain:
+1. **What changed** — which file, which part
+2. **Why** — what problem it solves
+3. **How it works** — step by step, in plain language
+4. **What to do next** — deploy instructions or next step
 
 ---
 

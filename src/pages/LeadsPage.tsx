@@ -304,7 +304,7 @@ export default function LeadsPage() {
               <Textarea
                 value={urlInput}
                 onChange={e => setUrlInput(e.target.value)}
-                placeholder={"https://www.e-food.gr/athens/catering\nhttps://www.skroutz.gr/restaurants/athens\n\nOne URL per line, or comma separated"}
+                placeholder={"https://www.example.com/businesses\nhttps://directory.gr/category\n\nOne URL per line — any public business directory or listing page"}
                 rows={4}
                 className="font-mono text-xs resize-none"
                 disabled={pipelineRunning}
@@ -313,7 +313,7 @@ export default function LeadsPage() {
               <Textarea
                 value={pasteContent}
                 onChange={e => setPasteContent(e.target.value)}
-                placeholder={"Open any page in your browser → Ctrl+A → Ctrl+C → paste here.\n\nWorks on Google Maps, directories, any website."}
+                placeholder={"Paste from anywhere:\n• Google Maps → search your target → Ctrl+A → Ctrl+C\n• Any business directory page → Ctrl+A → Ctrl+C\n• A company's website → Ctrl+A → Ctrl+C\n• LinkedIn search results, Instagram bios, etc.\n\nThe AI extracts business names, emails, phones, and websites."}
                 rows={6}
                 className="text-xs resize-none"
                 disabled={pipelineRunning}
@@ -492,8 +492,18 @@ export default function LeadsPage() {
                   </td>
                   <td className="p-3">
                     {lead.enrichment_source && (
-                      <Badge variant={lead.enrichment_source === "scraper" ? "success" : "outline"} className="text-xs">
-                        {lead.enrichment_source}
+                      <Badge
+                        variant={
+                          lead.enrichment_source === "no-website" ? "destructive"
+                          : lead.enrichment_source === "outdated-website" ? "warning"
+                          : lead.enrichment_source === "scraper" ? "success"
+                          : "outline"
+                        }
+                        className="text-xs"
+                      >
+                        {lead.enrichment_source === "no-website" ? "no website"
+                          : lead.enrichment_source === "outdated-website" ? "outdated site"
+                          : lead.enrichment_source}
                       </Badge>
                     )}
                   </td>
@@ -578,14 +588,45 @@ export default function LeadsPage() {
               {/* Tags */}
               <div className="flex gap-2 flex-wrap">
                 {selectedLead.enrichment_source && (
-                  <Badge variant={selectedLead.enrichment_source === "scraper" ? "success" : "outline"}>
-                    {selectedLead.enrichment_source}
+                  <Badge
+                    variant={
+                      selectedLead.enrichment_source === "no-website" ? "destructive"
+                      : selectedLead.enrichment_source === "outdated-website" ? "warning"
+                      : selectedLead.enrichment_source === "scraper" ? "success"
+                      : "outline"
+                    }
+                  >
+                    {selectedLead.enrichment_source === "no-website" ? "no website"
+                      : selectedLead.enrichment_source === "outdated-website" ? "outdated site"
+                      : selectedLead.enrichment_source}
                   </Badge>
                 )}
                 {selectedLead.lead_category && (
                   <Badge variant="secondary">{selectedLead.lead_category}</Badge>
                 )}
               </div>
+
+              {/* Google Maps shortcut — shown when no contact info found */}
+              {!selectedLead.email && !selectedLead.phone && selectedLead.company_name && (
+                <div className="rounded-lg border border-dashed p-3 flex items-start gap-3">
+                  <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div className="space-y-1.5 flex-1">
+                    <p className="text-xs text-muted-foreground">
+                      No contact info found automatically. The phone number is usually visible on their Google Maps listing.
+                    </p>
+                    <a
+                      href={`https://www.google.com/maps/search/${encodeURIComponent(selectedLead.company_name)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="outline" size="sm" className="h-7 text-xs">
+                        <MapPin className="h-3 w-3 mr-1.5" />
+                        Find on Google Maps
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+              )}
 
               {/* Outreach message */}
               {selectedLead.outreach_message && (

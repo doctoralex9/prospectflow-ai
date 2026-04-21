@@ -86,6 +86,24 @@ async function fetchWithPlainFetch(url: string): Promise<string> {
     .trim()
 }
 
+const OTA_PATTERN = /booking\.com|airbnb\.com|tripadvisor\.|expedia\.com|hotels\.com|agoda\.com|vrbo\.com/gi
+
+// Strips OTA-dominated lines from pasted content so the AI focuses on actual hotels.
+// Only activates when >15% of lines are pure OTA noise.
+function filterOTANoise(content: string): { filtered: string; otaRatio: number } {
+  const lines = content.split("\n")
+  const otaLineCount = lines.filter(l => OTA_PATTERN.test(l)).length
+  const otaRatio = otaLineCount / Math.max(lines.length, 1)
+
+  if (otaRatio > 0.15) {
+    const filtered = lines
+      .filter(l => !OTA_PATTERN.test(l) || /hotel|ξενοδοχ|διαμον|villa|studio|apart/i.test(l))
+      .join("\n")
+    return { filtered, otaRatio }
+  }
+  return { filtered: content, otaRatio }
+}
+
 // CrawlerAgent — tries Firecrawl (JS-rendered sites) if key provided, falls back to plain fetch
 async function crawlerAgent(urls: string[], firecrawlKey?: string): Promise<Array<{ url: string; content: string }>> {
   const results: Array<{ url: string; content: string }> = []
@@ -177,6 +195,97 @@ function enrichmentAgent(leads: Array<Record<string, unknown>>): Array<Record<st
   })
 }
 
+// Extracts email and phone from raw HTML text.
+// Email: prefers mailto: links (most reliable), falls back to plain-text regex.
+// Phone: matches Greek landlines (2XXXXXXXXX) and mobiles (69XXXXXXXX), with optional +30 prefix.
+function extractContactsFromHtml(html: string): { email: string | null; phone: string | null } {
+  let email: string | null = null
+  const mailtoMatch = html.match(/mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i)
+  if (mailtoMatch) {
+    email = mailtoMatch[1].toLowerCase()
+  } else {
+    const emailMatch = html.match(/\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/)
+    const candidate = emailMatch?.[1]?.toLowerCase()
+    if (candidate && !candidate.startsWith("noreply") && !candidate.includes("example.com") && !candidate.includes("sentry") && !candidate.includes("wixpress")) {
+      email = candidate
+    }
+  }
+
+  let phone: string | null = null
+  const phoneMatch = html.match(/(?:\+30[\s\-.]?)?(?:2\d{2}[\s\-.]?\d{3}[\s\-.]?\d{4}|2\d{3}[\s\-.]?\d{6}|69\d[\s\-.]?\d{3}[\s\-.]?\d{4})/)
+  if (phoneMatch) {
+    const digits = phoneMatch[0].replace(/[\s\-.]/g, "")
+    phone = digits.startsWith("+") ? digits : `+30${digits}`
+  }
+
+  return { email, phone }
+}
+
+// WebsiteCheckAgent — fetches each lead's website, scores it for outdatedness,
+// and extracts email + phone from the HTML while it's already downloaded.
+async function websiteCheckAgent(leads: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const BATCH_SIZE = 5
+  const results: Array<Record<string, unknown>> = []
+
+  for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+    const batch = leads.slice(i, i + BATCH_SIZE)
+    const checked = await Promise.all(batch.map(async (lead) => {
+      const website = lead.website as string
+      if (!website || !website.startsWith("http")) {
+        return { ...lead, website_signals: ["no website"], website_status: "no-website", enrichment_source: "no-website" }
+      }
+
+      try {
+        const html = await fetchWithPlainFetch(website)
+        const signals: string[] = []
+
+        // Copyright year check
+        const yearMatches = [...html.matchAll(/©\s*(\d{4})/g)]
+        if (yearMatches.length > 0) {
+          const years = yearMatches.map(m => parseInt(m[1]))
+          const maxYear = Math.max(...years)
+          if (maxYear < 2022) signals.push(`last updated ${maxYear}`)
+        }
+
+        // Mobile viewport
+        if (!html.toLowerCase().includes('name="viewport"') && !html.toLowerCase().includes("name='viewport'")) {
+          signals.push("not mobile-friendly")
+        }
+
+        // HTTPS
+        if (website.startsWith("http://")) signals.push("no HTTPS")
+
+        // No direct booking widget
+        const hasBookingWidget = /iframe[^>]*(reserv|cloudbeds|beds24|hotelrunner|siteminder|wubook)/i.test(html)
+        if (!hasBookingWidget) signals.push("no direct booking widget")
+
+        // Relies only on OTAs
+        const hasOTALinks = /booking\.com|airbnb\.com|expedia\.com/i.test(html)
+        if (hasOTALinks && !hasBookingWidget) signals.push("relies on OTAs only")
+
+        const isOutdated = signals.length >= 2
+
+        // Extract email + phone from HTML — only fill in if the AI didn't already find them
+        const { email: scrapedEmail, phone: scrapedPhone } = extractContactsFromHtml(html)
+
+        return {
+          ...lead,
+          email: (lead.email as string) || scrapedEmail || null,
+          phone: (lead.phone as string) || scrapedPhone || null,
+          website_signals: signals,
+          website_status: isOutdated ? "outdated" : "ok",
+          enrichment_source: isOutdated ? "outdated-website" : (lead.enrichment_source as string),
+        }
+      } catch {
+        return { ...lead, website_signals: ["website unreachable"], website_status: "unreachable", enrichment_source: "no-website" }
+      }
+    }))
+    results.push(...checked)
+  }
+
+  return results
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -248,8 +357,10 @@ Deno.serve(async (req) => {
         // Step 2: Crawler (skipped if rawContent provided)
         let pages: Array<{ url: string; content: string }>
         if (rawContent) {
-          pages = [{ url: "pasted-content", content: rawContent }]
-          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: "Using pasted content directly" })
+          const { filtered, otaRatio } = filterOTANoise(rawContent)
+          const wasFiltered = otaRatio > 0.15
+          pages = [{ url: "pasted-content", content: filtered }]
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: wasFiltered ? `OTA noise removed (${Math.round(otaRatio * 100)}% was booking sites) — using cleaned content` : "Using pasted content directly" })
         } else {
           send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
           pages = await crawlerAgent(urls, firecrawlKey)
@@ -271,11 +382,14 @@ Deno.serve(async (req) => {
         const extractedLeads = await qualifierAgent(pages, scraperConfig as { model: string; system_prompt: string })
         send(controller, "step", { step: 4, name: "QualifierAgent", status: "done", message: `Extracted ${extractedLeads.length} lead candidate${extractedLeads.length !== 1 ? "s" : ""}` })
 
-        // Step 5: Enrichment (scraper data only)
-        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: "Organizing contact data..." })
+        // Step 5: Enrichment + website check
+        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: "Checking websites for outdated signals..." })
         const enrichedLeads = enrichmentAgent(extractedLeads)
-        const withContact = enrichedLeads.filter(l => l.email || l.phone).length
-        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "done", message: `${withContact} lead${withContact !== 1 ? "s" : ""} with contact info found` })
+        const checkedLeads = await websiteCheckAgent(enrichedLeads)
+        const noWebsite = checkedLeads.filter(l => l.website_status === "no-website").length
+        const outdated = checkedLeads.filter(l => l.website_status === "outdated").length
+        const withContact = checkedLeads.filter(l => l.email || l.phone).length
+        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "done", message: `${noWebsite} no website · ${outdated} outdated · ${withContact} with contact info` })
 
         // Step 6: Persistence
         send(controller, "step", { step: 6, name: "PersistenceAgent", status: "running", message: "Saving leads to database..." })
@@ -283,8 +397,8 @@ Deno.serve(async (req) => {
         let savedCount = 0
         const SAVE_BATCH = 20
 
-        for (let i = 0; i < enrichedLeads.length; i += SAVE_BATCH) {
-          const batch = enrichedLeads.slice(i, i + SAVE_BATCH)
+        for (let i = 0; i < checkedLeads.length; i += SAVE_BATCH) {
+          const batch = checkedLeads.slice(i, i + SAVE_BATCH)
           const records = batch.map(lead => ({
             campaign_id: campaignId,
             company_name: (lead.company_name as string) || "Unknown",
