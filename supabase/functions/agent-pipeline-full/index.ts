@@ -104,6 +104,10 @@ function filterOTANoise(content: string): { filtered: string; otaRatio: number }
   return { filtered: content, otaRatio }
 }
 
+function isSameDomain(a: string, b: string): boolean {
+  try { return new URL(a).hostname === new URL(b).hostname } catch { return false }
+}
+
 async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
   const res = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -122,6 +126,63 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
   }
   const data = await res.json()
   return ((data.results || []) as Array<{ url: string }>).map(r => r.url).filter(Boolean)
+}
+
+// GooglePlacesAgent — looks up each lead on Google Places to fetch phone, address, website
+async function googlePlacesAgent(
+  leads: Array<Record<string, unknown>>,
+  apiKey: string,
+): Promise<Array<Record<string, unknown>>> {
+  const BATCH_SIZE = 5
+  const results: Array<Record<string, unknown>> = []
+
+  for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+    const batch = leads.slice(i, i + BATCH_SIZE)
+    const enriched = await Promise.all(batch.map(async (lead) => {
+      if (lead.phone) return lead // already have phone, skip API call
+
+      const name = (lead.company_name as string) || ""
+      const location = ((lead.raw_data as Record<string, unknown>)?.location as string) || ""
+      if (!name) return lead
+
+      const query = location ? `${name} ${location}` : name
+
+      try {
+        const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": apiKey,
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri",
+          },
+          body: JSON.stringify({ textQuery: query }),
+        })
+        if (!res.ok) return lead
+
+        const data = await res.json()
+        const place = data.places?.[0]
+        if (!place) return lead
+
+        const gotPhone = !!place.nationalPhoneNumber
+        return {
+          ...lead,
+          phone: (lead.phone as string) || place.nationalPhoneNumber || null,
+          website: (lead.website as string) || place.websiteUri || null,
+          raw_data: {
+            ...(lead.raw_data as Record<string, unknown>),
+            address: place.formattedAddress,
+            google_maps_enriched: true,
+          },
+          enrichment_source: gotPhone ? "google-maps" : (lead.enrichment_source as string),
+        }
+      } catch {
+        return lead
+      }
+    }))
+    results.push(...enriched)
+  }
+
+  return results
 }
 
 // CrawlerAgent — tries Firecrawl (JS-rendered sites) if key provided, falls back to plain fetch
@@ -190,10 +251,19 @@ async function qualifierAgent(
             return []
           }
           const lead = JSON.parse(objMatch[0]) as Record<string, unknown>
-          return [{ ...lead, source_url: lead.source_url || page.url }]
+          return [{
+            ...lead,
+            source_url: lead.source_url || page.url,
+            website: (lead.website && !isSameDomain(lead.website as string, page.url)) ? lead.website : "",
+          }]
         }
         const leads = JSON.parse(arrayMatch[0]) as Array<Record<string, unknown>>
-        return leads.map(lead => ({ ...lead, source_url: lead.source_url || page.url }))
+        return leads.map(lead => ({
+          ...lead,
+          source_url: lead.source_url || page.url,
+          // Clear website if it points back to the same directory we scraped — it's not the hotel's own site
+          website: (lead.website && !isSameDomain(lead.website as string, page.url)) ? lead.website : "",
+        }))
       } catch (e) {
         console.error("QualifierAgent error:", e)
         return []
@@ -322,6 +392,7 @@ Deno.serve(async (req) => {
   let searchQuery: string | undefined
   let tavilyKey: string | undefined
   let firecrawlKey: string | undefined
+  let googlePlacesKey: string | undefined
 
   try {
     const body = await req.json()
@@ -332,6 +403,7 @@ Deno.serve(async (req) => {
     searchQuery = body.searchQuery as string | undefined
     tavilyKey = body.tavilyKey as string | undefined
     firecrawlKey = (body.firecrawlKey as string | undefined) || Deno.env.get("FIRECRAWL_API_KEY") || undefined
+    googlePlacesKey = (body.googlePlacesKey as string | undefined) || Deno.env.get("GOOGLE_PLACES_API_KEY") || undefined
     if (!campaignId) throw new Error("campaign_id required")
     if (!rawContent && !urls.length && !searchQuery) throw new Error("urls, rawContent, or searchQuery required")
   } catch (e) {
@@ -438,14 +510,27 @@ Deno.serve(async (req) => {
         const extractedLeads = await qualifierAgent(pages, scraperConfig as { model: string; system_prompt: string })
         send(controller, "step", { step: 4, name: "QualifierAgent", status: "done", message: `Extracted ${extractedLeads.length} lead candidate${extractedLeads.length !== 1 ? "s" : ""}` })
 
-        // Step 5: Enrichment + website check
+        // Step 5: Enrichment + website check + optional Google Places lookup
         send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: "Checking websites for outdated signals..." })
         const enrichedLeads = enrichmentAgent(extractedLeads)
-        const checkedLeads = await websiteCheckAgent(enrichedLeads)
-        const noWebsite = checkedLeads.filter(l => l.website_status === "no-website").length
-        const outdated = checkedLeads.filter(l => l.website_status === "outdated").length
-        const withContact = checkedLeads.filter(l => l.email || l.phone).length
-        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "done", message: `${noWebsite} no website · ${outdated} outdated · ${withContact} with contact info` })
+        let finalLeads = await websiteCheckAgent(enrichedLeads)
+
+        if (googlePlacesKey) {
+          const missingPhone = finalLeads.filter(l => !l.phone).length
+          if (missingPhone > 0) {
+            send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Google Maps: looking up ${missingPhone} lead${missingPhone !== 1 ? "s" : ""} without phone...` })
+            finalLeads = await googlePlacesAgent(finalLeads, googlePlacesKey)
+          }
+        }
+
+        const noWebsite = finalLeads.filter(l => l.website_status === "no-website").length
+        const outdated = finalLeads.filter(l => l.website_status === "outdated").length
+        const withContact = finalLeads.filter(l => l.email || l.phone).length
+        const googleMapsEnriched = finalLeads.filter(l => l.enrichment_source === "google-maps").length
+        const enrichmentMsg = googleMapsEnriched > 0
+          ? `${noWebsite} no website · ${outdated} outdated · ${withContact} with contact info (${googleMapsEnriched} via Google Maps)`
+          : `${noWebsite} no website · ${outdated} outdated · ${withContact} with contact info`
+        send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "done", message: enrichmentMsg })
 
         // Step 6: Persistence
         send(controller, "step", { step: 6, name: "PersistenceAgent", status: "running", message: "Saving leads to database..." })
@@ -453,8 +538,8 @@ Deno.serve(async (req) => {
         let savedCount = 0
         const SAVE_BATCH = 20
 
-        for (let i = 0; i < checkedLeads.length; i += SAVE_BATCH) {
-          const batch = checkedLeads.slice(i, i + SAVE_BATCH)
+        for (let i = 0; i < finalLeads.length; i += SAVE_BATCH) {
+          const batch = finalLeads.slice(i, i + SAVE_BATCH)
           const records = batch.map(lead => ({
             campaign_id: campaignId,
             company_name: (lead.company_name as string) || "Unknown",
@@ -483,7 +568,7 @@ Deno.serve(async (req) => {
 
         await supabase
           .from("scrape_jobs")
-          .update({ status: "completed", pages_scraped: pages.length, leads_found: savedCount })
+          .update({ status: "completed", pages_scraped: pages.length, leads_found: finalLeads.length })
           .eq("id", jobId)
 
         send(controller, "step", { step: 6, name: "PersistenceAgent", status: "done", message: `Saved ${savedCount} lead${savedCount !== 1 ? "s" : ""} to database` })

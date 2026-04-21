@@ -101,6 +101,7 @@ export default function SettingsPage() {
   // API keys (stored locally in browser)
   const [tavilyKey, setTavilyKey] = useState(() => localStorage.getItem("leadflow_tavily_key") || "")
   const [firecrawlKey, setFirecrawlKey] = useState(() => localStorage.getItem("leadflow_firecrawl_key") || "")
+  const [googlePlacesKey, setGooglePlacesKey] = useState(() => localStorage.getItem("leadflow_google_places_key") || "")
 
   useEffect(() => {
     if (user) loadCampaigns()
@@ -235,6 +236,8 @@ export default function SettingsPage() {
     else localStorage.removeItem("leadflow_tavily_key")
     if (firecrawlKey) localStorage.setItem("leadflow_firecrawl_key", firecrawlKey)
     else localStorage.removeItem("leadflow_firecrawl_key")
+    if (googlePlacesKey) localStorage.setItem("leadflow_google_places_key", googlePlacesKey)
+    else localStorage.removeItem("leadflow_google_places_key")
     toast({ title: "API keys saved" })
   }
 
@@ -453,6 +456,18 @@ export default function SettingsPage() {
               />
               <p className="text-xs text-muted-foreground">Enables scraping of JS-rendered pages in URL mode. Free tier: 500 pages/month.</p>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Google Places API Key <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <Input
+              value={googlePlacesKey}
+              onChange={e => setGooglePlacesKey(e.target.value)}
+              placeholder="AIza..."
+              type="password"
+            />
+            <p className="text-xs text-muted-foreground">
+              Auto-fetches phone &amp; address from Google Maps for leads missing contact info. Works on every campaign. Google gives $200/month free credit (~11,000 lookups). Get a key at <strong>console.cloud.google.com</strong> → enable "Places API (New)".
+            </p>
           </div>
           <Button size="sm" onClick={saveApiKeys}>Save API Keys</Button>
         </CardContent>

@@ -154,13 +154,14 @@ export default function LeadsPage() {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
       },
-      body: JSON.stringify(
-        inputMode === "url"
-          ? { campaign_id: selectedCampaignId, user_id: user?.id, urls, firecrawlKey: localStorage.getItem("leadflow_firecrawl_key") || undefined }
-          : inputMode === "paste"
-          ? { campaign_id: selectedCampaignId, user_id: user?.id, rawContent: pasteContent }
-          : { campaign_id: selectedCampaignId, user_id: user?.id, searchQuery, tavilyKey }
-      ),
+      body: JSON.stringify({
+        campaign_id: selectedCampaignId,
+        user_id: user?.id,
+        ...(inputMode === "url" && { urls, firecrawlKey: localStorage.getItem("leadflow_firecrawl_key") || undefined }),
+        ...(inputMode === "paste" && { rawContent: pasteContent }),
+        ...(inputMode === "search" && { searchQuery, tavilyKey }),
+        googlePlacesKey: localStorage.getItem("leadflow_google_places_key") || undefined,
+      }),
       signal: abortRef.current.signal,
     }).then(async (response) => {
       if (!response.ok) {
@@ -539,12 +540,14 @@ export default function LeadsPage() {
                           lead.enrichment_source === "no-website" ? "destructive"
                           : lead.enrichment_source === "outdated-website" ? "warning"
                           : lead.enrichment_source === "scraper" ? "success"
+                          : lead.enrichment_source === "google-maps" ? "default"
                           : "outline"
                         }
                         className="text-xs"
                       >
                         {lead.enrichment_source === "no-website" ? "no website"
                           : lead.enrichment_source === "outdated-website" ? "outdated site"
+                          : lead.enrichment_source === "google-maps" ? "Google Maps"
                           : lead.enrichment_source}
                       </Badge>
                     )}
@@ -657,7 +660,12 @@ export default function LeadsPage() {
                       No contact info found automatically. The phone number is usually visible on their Google Maps listing.
                     </p>
                     <a
-                      href={`https://www.google.com/maps/search/${encodeURIComponent(selectedLead.company_name)}`}
+                      href={`https://www.google.com/maps/search/${encodeURIComponent(
+                        selectedLead.company_name +
+                        ((selectedLead.raw_data as Record<string, unknown>)?.location
+                          ? ` ${(selectedLead.raw_data as Record<string, unknown>).location}`
+                          : "")
+                      )}`}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
