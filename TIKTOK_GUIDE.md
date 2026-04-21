@@ -1,28 +1,49 @@
 # LeadFlow — Οδηγός Χρήσης & TikTok Demo Script
 
 ## Τι κάνει σε 1 πρόταση
-Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέφωνα και έτοιμα μηνύματα επικοινωνίας σε δευτερόλεπτα.
+Γράψε τι ψάχνεις (ή paste οτιδήποτε βρεις online) → AI βρίσκει τις επιχειρήσεις, βγάζει emails, τηλέφωνα και έτοιμα μηνύματα επικοινωνίας σε δευτερόλεπτα.
 
 ---
 
 ## Πώς λειτουργεί (3 βήματα)
 
 1. **Φτιάξε campaign** → πες στο AI τι πουλάς και σε ποιον (30 δευτερόλεπτα)
-2. **Paste οτιδήποτε** → Google Maps, directory site, ή απευθείας website εταιρείας
+2. **Δώσε δεδομένα** — διάλεξε έναν από τους 3 τρόπους:
+   - **AI Search** → γράψε τι ψάχνεις (π.χ. `οδοντίατροι Αθήνα`) — το AI βρίσκει τα sites μόνο του
+   - **Paste Content** → Google Maps, directory site, ή website εταιρείας → Ctrl+A → Ctrl+C → Paste
+   - **By URL** → paste URLs από public directories ή business listings
 3. **Παρακολούθα το pipeline** → AI εξάγει leads, ελέγχει websites, γράφει outreach emails
 
 ---
 
 ## Test Cases για TikTok Demo
 
-### Demo 1 — Web Designer που ψάχνει πελάτες (ΚΑΛΥΤΕΡΟ για TikTok)
+### Demo 1 — AI Search (ΝΕΟΣ ΤΡΟΠΟΣ — Καλύτερο για TikTok)
+**Campaign setup:**
+- Τι πουλάς: `επαγγελματικό website`
+- Σε ποιον: `μικρομεσαίες επιχειρήσεις που δεν έχουν website ή έχουν παλιό`
+
+**Πηγή:**
+- Leads → AI Search → γράψε `οδοντίατροι Αθήνα` → Search & Run
+- Το AI βρίσκει μόνο του τα σχετικά sites, τα κάνει scrape και εξάγει leads
+
+**Τι θα δεις:**
+- Leads με red badge "no website" → αυτοί χρειάζονται website
+- Leads με yellow badge "outdated site" → αυτοί έχουν παλιό
+- Έτοιμο email που εξηγεί γιατί χρειάζονται website
+
+**Γιατί είναι ισχυρό για TikTok:** ο χρήστης δεν ανοίγει καν browser — τα πάντα γίνονται μέσα στο app.
+
+---
+
+### Demo 2 — Web Designer με Paste (κλασικός τρόπος)
 **Campaign setup:**
 - Τι πουλάς: `επαγγελματικό website`
 - Σε ποιον: `μικρομεσαίες επιχειρήσεις που δεν έχουν website ή έχουν παλιό`
 
 **Πηγή:**
 - Google Maps → αναζήτησε `οδοντίατροι Αθήνα` ή `λογιστές Θεσσαλονίκη`
-- Ctrl+A → Ctrl+C → Paste στο LeadFlow
+- Ctrl+A → Ctrl+C → Paste Content στο LeadFlow
 
 **Τι θα δεις:**
 - Leads με red badge "no website" → αυτοί χρειάζονται website
@@ -31,7 +52,7 @@ Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέ�
 
 ---
 
-### Demo 2 — Social Media Manager
+### Demo 3 — Social Media Manager
 **Campaign setup:**
 - Τι πουλάς: `διαχείριση social media (Instagram/Facebook)`
 - Σε ποιον: `εστιατόρια και καφέ χωρίς ενεργό social media presence`
@@ -46,7 +67,7 @@ Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέ�
 
 ---
 
-### Demo 3 — Λογιστής / Freelancer λογιστικής
+### Demo 4 — Λογιστής / Freelancer λογιστικής
 **Campaign setup:**
 - Τι πουλάς: `λογιστικές υπηρεσίες για freelancers και μικρές επιχειρήσεις`
 - Σε ποιον: `νέες επιχειρήσεις και self-employed επαγγελματίες`
@@ -57,7 +78,7 @@ Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέ�
 
 ---
 
-### Demo 4 — SEO / Digital Marketing Agency
+### Demo 5 — SEO / Digital Marketing Agency
 **Campaign setup:**
 - Τι πουλάς: `SEO και Google Ads management`
 - Σε ποιον: `τοπικές επιχειρήσεις που δεν εμφανίζονται στην πρώτη σελίδα της Google`
@@ -68,7 +89,7 @@ Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέ�
 
 ---
 
-### Demo 5 — Φωτογράφος που ψάχνει γάμους / events
+### Demo 6 — Φωτογράφος που ψάχνει γάμους / events
 **Campaign setup:**
 - Τι πουλάς: `επαγγελματική φωτογράφηση γάμων και events`
 - Σε ποιον: `wedding planners και event organizers στην Ελλάδα`
@@ -81,6 +102,34 @@ Paste οτιδήποτε βρεις online → AI βγάζει emails, τηλέ�
 
 ## TikTok Demo Script (60 δευτερόλεπτα)
 
+### Εκδοχή Α — AI Search (νέο, πιο εντυπωσιακό)
+```
+[0-5s] Hook:
+"Γράφω 3 λέξεις και το AI μου βρίσκει 30 πελάτες"
+
+[5-15s] Setup campaign:
+Κλικ "New Campaign" → γράφω τι πουλάω → κλικ Generate
+"Έτοιμο — το AI ξέρει τώρα τι να ψάξει"
+
+[15-25s] AI Search:
+Leads → AI Search → γράφω "οδοντίατροι Αθήνα" → Search & Run
+"Δεν ανοίγω καν browser — το AI τα βρίσκει μόνο του"
+
+[25-45s] Pipeline τρέχει live:
+Step 1: "Found 10 results for οδοντίατροι Αθήνα"
+Step 2: Scraping pages...
+Step 5: "3 no website · 2 outdated · 4 with contact info"
+
+[45-55s] Αποτέλεσμα:
+Πίνακας με leads — red/yellow badges
+Κλικ σε ένα lead → βλέπω το έτοιμο outreach email
+"Αυτό το email το έγραψε το AI ειδικά για αυτή την επιχείρηση"
+
+[55-60s] CTA:
+"Link στο bio — δοκίμασε το δωρεάν"
+```
+
+### Εκδοχή Β — Paste από Google Maps (κλασική)
 ```
 [0-5s] Hook:
 "Πώς βρίσκω 50 πελάτες σε 5 λεπτά με AI"
@@ -110,8 +159,9 @@ Step 5: "3 no website · 2 outdated · 4 with contact info"
 
 ## Tips για καλύτερα αποτελέσματα
 
-| Πηγή | Ποιότητα leads | Σημείωση |
-|------|---------------|----------|
+| Τρόπος | Ποιότητα leads | Σημείωση |
+|--------|---------------|----------|
+| **AI Search** (νέο) | Καλή | Βολικότατο — γράψε ό,τι ψάχνεις, το AI βρίσκει URLs μόνο του |
 | Ιστοσελίδα επιχείρησης (paste) | Πολύ καλή | Email/phone συνήθως βρίσκεται |
 | Google Maps (paste) | Καλή | Ονόματα + κάποια τηλέφωνα |
 | Business directory (URL/paste) | Καλή | Εξαρτάται από το site |
@@ -126,7 +176,8 @@ Step 5: "3 no website · 2 outdated · 4 with contact info"
 Ναι. Απλά αλλάζεις το campaign (τι πουλάς + σε ποιον) και το AI προσαρμόζεται αυτόματα.
 
 **Χρειάζεται API key;**
-Μόνο OpenAI API key — χρεώνεται ανά χρήση, περίπου €0.01–0.05 ανά pipeline run.
+Για βασική χρήση (Paste / URL): μόνο OpenAI API key, ~€0.01–0.05 ανά run.
+Για AI Search: χρειάζεσαι επιπλέον Tavily API key (δωρεάν στο tavily.com, 1.000 αναζητήσεις/μήνα). Μπαίνει στο Settings → API Keys.
 
 **Τι γίνεται αν δεν βρει email;**
 Βγάζει το κουμπί "Find on Google Maps" για κάθε lead — ένα κλικ και βλέπεις τον αριθμό τηλεφώνου απευθείας.
