@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Plus, Trash2, Edit2, Loader2, Database, Sparkles } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 
 function buildAgentConfigs(product: string, target: string, language: string) {
@@ -97,6 +97,10 @@ export default function SettingsPage() {
 
   // Wizard state
   const [wizard, setWizard] = useState({ product: "", target: "", language: "greek" })
+
+  // API keys (stored locally in browser)
+  const [tavilyKey, setTavilyKey] = useState(() => localStorage.getItem("leadflow_tavily_key") || "")
+  const [firecrawlKey, setFirecrawlKey] = useState(() => localStorage.getItem("leadflow_firecrawl_key") || "")
 
   useEffect(() => {
     if (user) loadCampaigns()
@@ -224,6 +228,14 @@ export default function SettingsPage() {
     } else {
       toast({ title: `${config.agent_type} config saved` })
     }
+  }
+
+  function saveApiKeys() {
+    if (tavilyKey) localStorage.setItem("leadflow_tavily_key", tavilyKey)
+    else localStorage.removeItem("leadflow_tavily_key")
+    if (firecrawlKey) localStorage.setItem("leadflow_firecrawl_key", firecrawlKey)
+    else localStorage.removeItem("leadflow_firecrawl_key")
+    toast({ title: "API keys saved" })
   }
 
   async function loadSampleData() {
@@ -393,7 +405,7 @@ export default function SettingsPage() {
                     const config = getConfig(agentType)
                     return (
                       <AgentConfigCard
-                        key={agentType}
+                        key={`${selectedCampaignId}-${agentType}`}
                         config={config as AgentConfig}
                         onSave={saveAgentConfig}
                       />
@@ -409,6 +421,42 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      {/* API Keys */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Key className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">API Keys</CardTitle>
+          </div>
+          <CardDescription className="text-xs">Stored locally in your browser — never sent to our servers</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Tavily API Key</Label>
+              <Input
+                value={tavilyKey}
+                onChange={e => setTavilyKey(e.target.value)}
+                placeholder="tvly-..."
+                type="password"
+              />
+              <p className="text-xs text-muted-foreground">Powers "AI Search" mode on Leads page. Free at tavily.com (1,000 searches/month).</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Firecrawl API Key <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <Input
+                value={firecrawlKey}
+                onChange={e => setFirecrawlKey(e.target.value)}
+                placeholder="fc-..."
+                type="password"
+              />
+              <p className="text-xs text-muted-foreground">Enables scraping of JS-rendered pages in URL mode. Free tier: 500 pages/month.</p>
+            </div>
+          </div>
+          <Button size="sm" onClick={saveApiKeys}>Save API Keys</Button>
+        </CardContent>
+      </Card>
 
       {/* New Campaign Wizard Dialog */}
       <Dialog open={showNewCampaign} onOpenChange={setShowNewCampaign}>

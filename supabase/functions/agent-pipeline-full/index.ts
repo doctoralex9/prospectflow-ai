@@ -104,6 +104,26 @@ function filterOTANoise(content: string): { filtered: string; otaRatio: number }
   return { filtered: content, otaRatio }
 }
 
+async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
+  const res = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      search_depth: "basic",
+      max_results: 10,
+      include_answer: false,
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Tavily [${res.status}]: ${text}`)
+  }
+  const data = await res.json()
+  return ((data.results || []) as Array<{ url: string }>).map(r => r.url).filter(Boolean)
+}
+
 // CrawlerAgent — tries Firecrawl (JS-rendered sites) if key provided, falls back to plain fetch
 async function crawlerAgent(urls: string[], firecrawlKey?: string): Promise<Array<{ url: string; content: string }>> {
   const results: Array<{ url: string; content: string }> = []
@@ -295,12 +315,13 @@ Deno.serve(async (req) => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || undefined
-
   let campaignId: string
   let userId: string
   let urls: string[]
   let rawContent: string | undefined
+  let searchQuery: string | undefined
+  let tavilyKey: string | undefined
+  let firecrawlKey: string | undefined
 
   try {
     const body = await req.json()
@@ -308,8 +329,11 @@ Deno.serve(async (req) => {
     userId = body.user_id
     urls = (body.urls as string[]) || []
     rawContent = body.rawContent as string | undefined
+    searchQuery = body.searchQuery as string | undefined
+    tavilyKey = body.tavilyKey as string | undefined
+    firecrawlKey = (body.firecrawlKey as string | undefined) || Deno.env.get("FIRECRAWL_API_KEY") || undefined
     if (!campaignId) throw new Error("campaign_id required")
-    if (!rawContent && !urls.length) throw new Error("urls or rawContent required")
+    if (!rawContent && !urls.length && !searchQuery) throw new Error("urls, rawContent, or searchQuery required")
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 400,
@@ -342,7 +366,7 @@ Deno.serve(async (req) => {
   // Create scrape job
   const { data: scrapeJob } = await supabase
     .from("scrape_jobs")
-    .insert({ campaign_id: campaignId, target_url: urls.length ? urls.join(", ") : "pasted-content", status: "running" })
+    .insert({ campaign_id: campaignId, target_url: searchQuery ? `search:${searchQuery}` : urls.length ? urls.join(", ") : "pasted-content", status: "running" })
     .select()
     .single()
 
@@ -351,17 +375,49 @@ Deno.serve(async (req) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Step 1: Input ready
-        send(controller, "step", { step: 1, name: "URLInput", status: "done", message: rawContent ? "Content paste mode — skipping crawler" : `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
-
-        // Step 2: Crawler (skipped if rawContent provided)
+        // Steps 1 & 2: handle three input modes
         let pages: Array<{ url: string; content: string }>
-        if (rawContent) {
+
+        if (searchQuery) {
+          // Search mode — Tavily finds URLs, then we crawl them
+          send(controller, "step", { step: 1, name: "URLInput", status: "running", message: `Searching for: "${searchQuery}"...` })
+          const apiKey = tavilyKey || Deno.env.get("TAVILY_API_KEY") || ""
+          if (!apiKey) {
+            send(controller, "error", { message: "Tavily API key not configured. Add it in Settings → API Keys." })
+            await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No Tavily key" }).eq("id", jobId)
+            controller.close()
+            return
+          }
+          const foundUrls = await tavilySearch(searchQuery, apiKey)
+          if (!foundUrls.length) {
+            send(controller, "error", { message: `No results found for "${searchQuery}". Try a different search query.` })
+            await supabase.from("scrape_jobs").update({ status: "failed", error_message: "Tavily returned no results" }).eq("id", jobId)
+            controller.close()
+            return
+          }
+          send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `Found ${foundUrls.length} result${foundUrls.length !== 1 ? "s" : ""} for "${searchQuery}"` })
+
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${foundUrls.length} page${foundUrls.length !== 1 ? "s" : ""}...` })
+          pages = await crawlerAgent(foundUrls, firecrawlKey)
+          if (!pages.length) {
+            send(controller, "error", { message: "Could not scrape any of the found pages. Try a different query." })
+            await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped from search results" }).eq("id", jobId)
+            controller.close()
+            return
+          }
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: `Scraped ${pages.length} page${pages.length !== 1 ? "s" : ""}` })
+
+        } else if (rawContent) {
+          // Paste mode — skip crawler
           const { filtered, otaRatio } = filterOTANoise(rawContent)
           const wasFiltered = otaRatio > 0.15
           pages = [{ url: "pasted-content", content: filtered }]
+          send(controller, "step", { step: 1, name: "URLInput", status: "done", message: "Content paste mode — skipping crawler" })
           send(controller, "step", { step: 2, name: "CrawlerAgent", status: "done", message: wasFiltered ? `OTA noise removed (${Math.round(otaRatio * 100)}% was booking sites) — using cleaned content` : "Using pasted content directly" })
+
         } else {
+          // URL mode — crawl provided URLs
+          send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
           send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
           pages = await crawlerAgent(urls, firecrawlKey)
           if (pages.length === 0) {

@@ -52,8 +52,9 @@ export default function LeadsPage() {
   const [savingNotes, setSavingNotes] = useState(false)
   const [urlInput, setUrlInput] = useState("")
   const [showUrlInput, setShowUrlInput] = useState(false)
-  const [inputMode, setInputMode] = useState<"url" | "paste">("url")
+  const [inputMode, setInputMode] = useState<"url" | "paste" | "search">("url")
   const [pasteContent, setPasteContent] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -127,6 +128,15 @@ export default function LeadsPage() {
       toast({ title: "No content", description: "Paste some text content first", variant: "destructive" })
       return
     }
+    if (inputMode === "search" && !searchQuery.trim()) {
+      toast({ title: "No search query", description: "Describe what businesses you're looking for", variant: "destructive" })
+      return
+    }
+    const tavilyKey = localStorage.getItem("leadflow_tavily_key") || ""
+    if (inputMode === "search" && !tavilyKey) {
+      toast({ title: "Tavily API key not set", description: "Add it in Settings → API Keys", variant: "destructive" })
+      return
+    }
 
     setPipelineRunning(true)
     setShowPipeline(true)
@@ -146,8 +156,10 @@ export default function LeadsPage() {
       },
       body: JSON.stringify(
         inputMode === "url"
-          ? { campaign_id: selectedCampaignId, user_id: user?.id, urls }
-          : { campaign_id: selectedCampaignId, user_id: user?.id, rawContent: pasteContent }
+          ? { campaign_id: selectedCampaignId, user_id: user?.id, urls, firecrawlKey: localStorage.getItem("leadflow_firecrawl_key") || undefined }
+          : inputMode === "paste"
+          ? { campaign_id: selectedCampaignId, user_id: user?.id, rawContent: pasteContent }
+          : { campaign_id: selectedCampaignId, user_id: user?.id, searchQuery, tavilyKey }
       ),
       signal: abortRef.current.signal,
     }).then(async (response) => {
@@ -292,6 +304,12 @@ export default function LeadsPage() {
               >
                 Paste Content
               </button>
+              <button
+                onClick={() => { setInputMode("search"); setShowUrlInput(true) }}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded font-medium transition-colors ${inputMode === "search" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <Search className="h-3.5 w-3.5" /> AI Search
+              </button>
             </div>
             <button onClick={() => setShowUrlInput(p => !p)} className="text-muted-foreground hover:text-foreground">
               {showUrlInput ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -309,7 +327,7 @@ export default function LeadsPage() {
                 className="font-mono text-xs resize-none"
                 disabled={pipelineRunning}
               />
-            ) : (
+            ) : inputMode === "paste" ? (
               <Textarea
                 value={pasteContent}
                 onChange={e => setPasteContent(e.target.value)}
@@ -318,12 +336,28 @@ export default function LeadsPage() {
                 className="text-xs resize-none"
                 disabled={pipelineRunning}
               />
+            ) : (
+              <div className="space-y-2">
+                {!localStorage.getItem("leadflow_tavily_key") && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                    Tavily API key not set. Go to <strong>Settings → API Keys</strong> to add it (free at tavily.com).
+                  </p>
+                )}
+                <Input
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="e.g. catering companies Athens, dentists in Thessaloniki, hotels in Crete..."
+                  disabled={pipelineRunning}
+                />
+              </div>
             )}
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 {inputMode === "url"
                   ? "One URL per line • up to 20 URLs per run • public pages only"
-                  : "Paste raw text from any page • AI will extract leads from it"}
+                  : inputMode === "paste"
+                  ? "Paste raw text from any page • AI will extract leads from it"
+                  : "Tavily finds relevant pages • AI extracts business leads from them"}
               </p>
               {pipelineRunning ? (
                 <Button variant="outline" onClick={stopPipeline} size="sm">
@@ -332,12 +366,17 @@ export default function LeadsPage() {
               ) : (
                 <Button
                   onClick={startPipeline}
-                  disabled={!selectedCampaignId || (inputMode === "url" ? parsedUrlCount === 0 : !pasteContent.trim())}
+                  disabled={!selectedCampaignId || (
+                    inputMode === "url" ? parsedUrlCount === 0
+                    : inputMode === "paste" ? !pasteContent.trim()
+                    : !searchQuery.trim() || !localStorage.getItem("leadflow_tavily_key")
+                  )}
                   size="sm"
                 >
                   <Play className="h-3.5 w-3.5 mr-1.5" />
-                  Run Pipeline
-                  {inputMode === "url" && parsedUrlCount > 0 && ` (${parsedUrlCount})`}
+                  {inputMode === "search" ? "Search & Run"
+                    : inputMode === "url" && parsedUrlCount > 0 ? `Run Pipeline (${parsedUrlCount})`
+                    : "Run Pipeline"}
                 </Button>
               )}
             </div>
@@ -355,10 +394,13 @@ export default function LeadsPage() {
                   onClick={() => { setShowUrlInput(true); }}
                   disabled={!selectedCampaignId}
                   size="sm"
-                  variant={parsedUrlCount > 0 ? "default" : "outline"}
+                  variant={(parsedUrlCount > 0 || (inputMode === "search" && !!searchQuery.trim())) ? "default" : "outline"}
                 >
                   <Play className="h-3.5 w-3.5 mr-1.5" />
-                  {parsedUrlCount > 0 ? `Run Pipeline (${parsedUrlCount} URLs)` : "Add URLs & Run"}
+                  {inputMode === "search" && searchQuery.trim() ? `Search & Run`
+                    : parsedUrlCount > 0 ? `Run Pipeline (${parsedUrlCount} URLs)`
+                    : inputMode === "search" ? "Enter Search Query"
+                    : "Add URLs & Run"}
                 </Button>
               )}
             </div>
