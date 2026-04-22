@@ -5,6 +5,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
+// deno-lint-ignore no-explicit-any
+async function verifyUser(req: Request, supabaseUrl: string, supabaseAnonKey: string): Promise<any | null> {
+  const authHeader = req.headers.get("Authorization")
+  if (!authHeader?.startsWith("Bearer ")) return null
+  const token = authHeader.replace("Bearer ", "")
+  const anonClient = createClient(supabaseUrl, supabaseAnonKey)
+  const { data: { user }, error } = await anonClient.auth.getUser(token)
+  if (error || !user) return null
+  return user
+}
+
+// deno-lint-ignore no-explicit-any
+async function checkRateLimit(supabase: any, userId: string, functionName: string, maxPerHour: number): Promise<boolean> {
+  const oneHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+  const { count } = await supabase
+    .from("api_rate_limits")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("function_name", functionName)
+    .gte("created_at", oneHourAgo)
+  if ((count ?? 0) >= maxPerHour) return false
+  await supabase.from("api_rate_limits").insert({ user_id: userId, function_name: functionName })
+  if (Math.random() < 0.01) {
+    const twoDaysAgo = new Date(Date.now() - 172_800_000).toISOString()
+    supabase.from("api_rate_limits").delete().lt("created_at", twoDaysAgo).then(() => {})
+  }
+  return true
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -12,6 +41,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
   const openaiKey = Deno.env.get("OPENAI_API_KEY")
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -22,9 +52,27 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Verify the caller's identity from their JWT
+  const user = await verifyUser(req, supabaseUrl, supabaseAnonKey)
+  if (!user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    })
+  }
+  const userId = user.id
+
+  // Rate limit: 60 chat messages per hour per user
+  const allowed = await checkRateLimit(supabase, userId, "agent-chat", 60)
+  if (!allowed) {
+    return new Response(JSON.stringify({ error: "Rate limit exceeded. Maximum 60 chat messages per hour." }), {
+      status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    })
+  }
+
   let sessionId: string | undefined
   let campaignId: string | undefined
-  let userId: string | undefined
   let message: string
   let agentType: string
 
@@ -34,7 +82,6 @@ Deno.serve(async (req) => {
     agentType = body.agent_type || "assistant"
     sessionId = body.session_id
     campaignId = body.campaign_id
-    userId = body.user_id
     if (!message) throw new Error("message required")
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
@@ -43,7 +90,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Get or create session
+  // Get or create session — always tied to the verified userId
   if (!sessionId) {
     const { data: session } = await supabase
       .from("chat_sessions")
@@ -115,7 +162,6 @@ Agent type: ${agentType}`
       ctrl.enqueue(chunk)
     },
     flush() {
-      // Save assistant message after stream completes
       if (sessionId && fullResponse) {
         supabase.from("chat_messages")
           .insert({ session_id: sessionId, role: "assistant", content: fullResponse })

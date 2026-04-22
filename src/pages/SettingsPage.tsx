@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key, RefreshCw, ExternalLink } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 
 function buildAgentConfigs(product: string, target: string, language: string) {
@@ -102,6 +102,28 @@ export default function SettingsPage() {
   const [tavilyKey, setTavilyKey] = useState(() => localStorage.getItem("leadflow_tavily_key") || "")
   const [firecrawlKey, setFirecrawlKey] = useState(() => localStorage.getItem("leadflow_firecrawl_key") || "")
   const [googlePlacesKey, setGooglePlacesKey] = useState(() => localStorage.getItem("leadflow_google_places_key") || "")
+  const [firecrawlBalance, setFirecrawlBalance] = useState<{ credits: number } | null>(null)
+  const [checkingBalance, setCheckingBalance] = useState(false)
+
+  async function checkFirecrawlBalance() {
+    const key = firecrawlKey || localStorage.getItem("leadflow_firecrawl_key") || ""
+    if (!key) { toast({ title: "Enter your Firecrawl API key first", variant: "destructive" }); return }
+    setCheckingBalance(true)
+    try {
+      const res = await fetch("https://api.firecrawl.dev/v1/account", {
+        headers: { Authorization: `Bearer ${key}` },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json()
+      const credits = json?.data?.credits ?? json?.credits ?? null
+      if (credits === null) throw new Error("Unexpected response format")
+      setFirecrawlBalance({ credits })
+    } catch (e) {
+      toast({ title: "Could not fetch Firecrawl balance", description: String(e), variant: "destructive" })
+    } finally {
+      setCheckingBalance(false)
+    }
+  }
 
   useEffect(() => {
     if (user) loadCampaigns()
@@ -448,13 +470,28 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <Label>Firecrawl API Key <span className="font-normal text-muted-foreground">(optional)</span></Label>
-              <Input
-                value={firecrawlKey}
-                onChange={e => setFirecrawlKey(e.target.value)}
-                placeholder="fc-..."
-                type="password"
-              />
-              <p className="text-xs text-muted-foreground">Enables scraping of JS-rendered pages in URL mode. Free tier: 500 pages/month.</p>
+              <div className="flex gap-2">
+                <Input
+                  value={firecrawlKey}
+                  onChange={e => { setFirecrawlKey(e.target.value); setFirecrawlBalance(null) }}
+                  placeholder="fc-..."
+                  type="password"
+                  className="flex-1"
+                />
+                <Button variant="outline" size="sm" onClick={checkFirecrawlBalance} disabled={checkingBalance} className="shrink-0">
+                  {checkingBalance ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  <span className="ml-1.5">Balance</span>
+                </Button>
+              </div>
+              {firecrawlBalance !== null && (
+                <div className={`flex items-center justify-between text-xs rounded px-3 py-1.5 ${firecrawlBalance.credits < 50 ? "bg-red-900/30 text-red-400" : firecrawlBalance.credits < 150 ? "bg-amber-900/30 text-amber-400" : "bg-green-900/30 text-green-400"}`}>
+                  <span><strong>{firecrawlBalance.credits}</strong> credits remaining (1 credit = 1 URL scraped)</span>
+                  <a href="https://www.firecrawl.dev/app/usage" target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 hover:underline ml-2">
+                    Dashboard <ExternalLink className="h-3 w-3 ml-0.5" />
+                  </a>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Enables scraping of JS-rendered pages in URL mode. Free tier: 500 pages/month. Each URL = 1 credit.</p>
             </div>
           </div>
           <div className="space-y-2">

@@ -5,6 +5,41 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
+// Verify the user JWT from the Authorization header. Returns the user or null.
+async function verifyUser(req: Request, supabaseUrl: string, supabaseAnonKey: string) {
+  const authHeader = req.headers.get("Authorization")
+  if (!authHeader?.startsWith("Bearer ")) return null
+  const token = authHeader.replace("Bearer ", "")
+  const anonClient = createClient(supabaseUrl, supabaseAnonKey)
+  const { data: { user }, error } = await anonClient.auth.getUser(token)
+  if (error || !user) return null
+  return user
+}
+
+// Returns false if the user has exceeded maxPerHour calls. Logs the call and cleans up old rows (1% chance).
+async function checkRateLimit(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  functionName: string,
+  maxPerHour: number,
+): Promise<boolean> {
+  const oneHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+  const { count } = await supabase
+    .from("api_rate_limits")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("function_name", functionName)
+    .gte("created_at", oneHourAgo)
+  if ((count ?? 0) >= maxPerHour) return false
+  await supabase.from("api_rate_limits").insert({ user_id: userId, function_name: functionName })
+  if (Math.random() < 0.01) {
+    const twoDaysAgo = new Date(Date.now() - 172_800_000).toISOString()
+    supabase.from("api_rate_limits").delete().lt("created_at", twoDaysAgo).then(() => {})
+  }
+  return true
+}
+
 async function callAI(model: string, systemPrompt: string, userContent: string, retries = 2): Promise<string> {
   const apiKey = Deno.env.get("OPENAI_API_KEY")
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured")
@@ -383,10 +418,29 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
+  // Verify the caller's identity from their JWT
+  const user = await verifyUser(req, supabaseUrl, supabaseAnonKey)
+  if (!user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    })
+  }
+  const userId = user.id
+
+  // Rate limit: 20 pipeline runs per hour per user
+  const allowed = await checkRateLimit(supabase, userId, "agent-pipeline-full", 20)
+  if (!allowed) {
+    return new Response(JSON.stringify({ error: "Rate limit exceeded. Maximum 20 pipeline runs per hour." }), {
+      status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    })
+  }
+
   let campaignId: string
-  let userId: string
   let urls: string[]
   let rawContent: string | undefined
   let searchQuery: string | undefined
@@ -397,7 +451,6 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json()
     campaignId = body.campaign_id
-    userId = body.user_id
     urls = (body.urls as string[]) || []
     rawContent = body.rawContent as string | undefined
     searchQuery = body.searchQuery as string | undefined
@@ -413,11 +466,12 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Load campaign + agent configs
+  // Load campaign — verify it belongs to the authenticated user
   const { data: campaign, error: campaignErr } = await supabase
     .from("campaigns")
     .select("*")
     .eq("id", campaignId)
+    .eq("user_id", userId)
     .single()
 
   if (campaignErr || !campaign) {

@@ -113,7 +113,7 @@ export default function LeadsPage() {
       .filter(u => u.startsWith("http://") || u.startsWith("https://"))
   }
 
-  function startPipeline() {
+  async function startPipeline() {
     if (!selectedCampaignId) {
       toast({ title: "No campaign selected", variant: "destructive" })
       return
@@ -145,6 +145,9 @@ export default function LeadsPage() {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
+    const { data: { session } } = await supabase.auth.getSession()
+    const authToken = session?.access_token || supabaseKey
+
     abortRef.current = new AbortController()
 
     fetch(`${supabaseUrl}/functions/v1/agent-pipeline-full`, {
@@ -152,7 +155,7 @@ export default function LeadsPage() {
       headers: {
         "Content-Type": "application/json",
         apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
+        Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({
         campaign_id: selectedCampaignId,
@@ -197,7 +200,8 @@ export default function LeadsPage() {
             if (eventType === "step") {
               setSteps(prev => prev.map(s => s.step === parsed.step ? { ...s, status: parsed.status, message: parsed.message } : s))
             } else if (eventType === "complete") {
-              toast({ title: `Done! Found ${parsed.total_leads} leads.` })
+              const creditNote = parsed.firecrawl_credits_used > 0 ? ` · ${parsed.firecrawl_credits_used} Firecrawl credit${parsed.firecrawl_credits_used !== 1 ? "s" : ""} used` : ""
+              toast({ title: `Done! Found ${parsed.total_leads} leads.`, description: creditNote ? `Check Settings → API Keys to see remaining balance${creditNote}` : undefined })
               setPipelineRunning(false)
               loadLeads()
             } else if (eventType === "error") {
@@ -353,13 +357,20 @@ export default function LeadsPage() {
               </div>
             )}
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {inputMode === "url"
-                  ? "One URL per line • up to 20 URLs per run • public pages only"
-                  : inputMode === "paste"
-                  ? "Paste raw text from any page • AI will extract leads from it"
-                  : "Tavily finds relevant pages • AI extracts business leads from them"}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">
+                  {inputMode === "url"
+                    ? "One URL per line • up to 20 URLs per run • public pages only"
+                    : inputMode === "paste"
+                    ? "Paste raw text from any page • AI will extract leads from it"
+                    : "Tavily finds relevant pages • AI extracts business leads from them"}
+                </p>
+                {inputMode === "url" && parsedUrlCount > 0 && localStorage.getItem("leadflow_firecrawl_key") && (
+                  <span className="text-xs bg-amber-900/30 text-amber-400 rounded px-2 py-0.5 shrink-0">
+                    ~{parsedUrlCount} Firecrawl credit{parsedUrlCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
               {pipelineRunning ? (
                 <Button variant="outline" onClick={stopPipeline} size="sm">
                   <X className="h-3.5 w-3.5 mr-1.5" /> Stop
