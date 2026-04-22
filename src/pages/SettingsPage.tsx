@@ -64,11 +64,13 @@ If no real data exists, return empty strings.`,
 You are selling: ${product}
 You are writing to: ${target}
 
+IMPORTANT: The lead data includes a field "lead_phone" — this is the LEAD'S own phone number, NOT yours. Never use it as your contact number.
+
 Structure:
 1. Address the business by name
 2. One sentence about their specific situation or pain point that your offer solves
 3. One sentence about what you offer and the concrete benefit
-4. CTA: propose a quick call or ask if they want to know more
+4. CTA: end the message with your contact — always write the literal placeholder [ΚΙΝΗΤΟ], never fill it with any real number.
 
 Tone: Friendly, direct, human — not a template, not salesy. 4 sentences max.
 ${langLine}`,

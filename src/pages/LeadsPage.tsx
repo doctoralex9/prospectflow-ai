@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
   Play, Download, Search, CheckCircle2, Circle, Loader2,
-  Mail, Phone, Globe, MapPin, User, Building2, X, Link, ChevronDown, ChevronUp
+  Mail, Phone, Globe, MapPin, User, Building2, X, Link, ChevronDown, ChevronUp, Copy, Check
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { toast } from "@/hooks/use-toast"
@@ -55,6 +55,8 @@ export default function LeadsPage() {
   const [inputMode, setInputMode] = useState<"url" | "paste" | "search">("url")
   const [pasteContent, setPasteContent] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [pipelineError, setPipelineError] = useState<string | null>(null)
+  const [errorCopied, setErrorCopied] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -62,7 +64,13 @@ export default function LeadsPage() {
   }, [user])
 
   useEffect(() => {
-    if (selectedCampaignId) loadLeads()
+    if (selectedCampaignId) {
+      loadLeads()
+      const campaign = campaigns.find(c => c.id === selectedCampaignId)
+      if (campaign?.perplexity_default_query && !searchQuery) {
+        setSearchQuery(campaign.perplexity_default_query)
+      }
+    }
   }, [selectedCampaignId])
 
   useEffect(() => {
@@ -141,6 +149,7 @@ export default function LeadsPage() {
     setPipelineRunning(true)
     setShowPipeline(true)
     setSteps(INITIAL_STEPS.map(s => ({ ...s })))
+    setPipelineError(null)
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -169,7 +178,7 @@ export default function LeadsPage() {
     }).then(async (response) => {
       if (!response.ok) {
         const text = await response.text()
-        toast({ title: "Pipeline failed to start", description: text, variant: "destructive" })
+        setPipelineError(`HTTP ${response.status}\n${text}`)
         setPipelineRunning(false)
         return
       }
@@ -205,7 +214,7 @@ export default function LeadsPage() {
               setPipelineRunning(false)
               loadLeads()
             } else if (eventType === "error") {
-              toast({ title: "Pipeline error", description: parsed.message, variant: "destructive" })
+              setPipelineError(parsed.message)
               setSteps(prev => prev.map(s => s.status === "running" ? { ...s, status: "error" } : s))
               setPipelineRunning(false)
             }
@@ -215,7 +224,7 @@ export default function LeadsPage() {
       setPipelineRunning(false)
     }).catch((e) => {
       if (e.name !== "AbortError") {
-        toast({ title: "Connection error", description: String(e), variant: "destructive" })
+        setPipelineError(String(e))
         setPipelineRunning(false)
       }
     })
@@ -344,7 +353,7 @@ export default function LeadsPage() {
             ) : (
               <div className="space-y-2">
                 {!localStorage.getItem("leadflow_tavily_key") && (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  <p className="text-xs text-amber-500 bg-amber-950/40 border border-amber-800/40 rounded px-3 py-2">
                     Tavily API key not set. Go to <strong>Settings → API Keys</strong> to add it (free at tavily.com).
                   </p>
                 )}
@@ -354,6 +363,37 @@ export default function LeadsPage() {
                   placeholder="e.g. catering companies Athens, dentists in Thessaloniki, hotels in Crete..."
                   disabled={pipelineRunning}
                 />
+                {(() => {
+                  const campaign = campaigns.find(c => c.id === selectedCampaignId)
+                  if (!campaign) return null
+                  const suggestions = [
+                    campaign.perplexity_default_query,
+                    campaign.icp_description ? `${campaign.icp_description} Greece` : null,
+                    campaign.target_site ? `site:${campaign.target_site} businesses` : null,
+                  ].filter(Boolean) as string[]
+                  return (
+                    <div className="rounded-md border border-border/50 bg-muted/30 p-2.5 space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">Search guide for <span className="text-foreground">{campaign.name}</span></p>
+                      {campaign.icp_description && (
+                        <p className="text-xs text-muted-foreground">Target: {campaign.icp_description}</p>
+                      )}
+                      {suggestions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {suggestions.map((s, i) => (
+                            <button
+                              key={i}
+                              onClick={() => setSearchQuery(s)}
+                              className="text-xs bg-background border border-border rounded px-2 py-0.5 hover:border-primary hover:text-primary transition-colors text-left"
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground/70">Tip: add a city for better results — e.g. "dentists Athens", "hotels Crete"</p>
+                    </div>
+                  )
+                })()}
               </div>
             )}
             <div className="flex items-center justify-between">
@@ -452,6 +492,25 @@ export default function LeadsPage() {
                 </div>
               ))}
             </div>
+            {pipelineError && (
+              <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-medium text-destructive">Error</p>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(pipelineError)
+                      setErrorCopied(true)
+                      setTimeout(() => setErrorCopied(false), 2000)
+                    }}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {errorCopied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                    {errorCopied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <pre className="text-xs text-destructive/80 whitespace-pre-wrap break-all font-mono select-all">{pipelineError}</pre>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

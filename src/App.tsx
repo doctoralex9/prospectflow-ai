@@ -5,7 +5,6 @@ import AuthPage from "@/pages/AuthPage"
 import DashboardPage from "@/pages/DashboardPage"
 import LeadsPage from "@/pages/LeadsPage"
 import SettingsPage from "@/pages/SettingsPage"
-import ChatPage from "@/pages/ChatPage"
 import { Toaster } from "@/components/ui/toaster"
 import { Loader2 } from "lucide-react"
 
@@ -33,7 +32,6 @@ export default function App() {
         <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/leads" element={<ProtectedRoute><LeadsPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-        <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toaster />

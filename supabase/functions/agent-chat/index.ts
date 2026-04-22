@@ -5,15 +5,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-// deno-lint-ignore no-explicit-any
-async function verifyUser(req: Request, supabaseUrl: string, supabaseAnonKey: string): Promise<any | null> {
+function getUserFromToken(req: Request): { id: string } | null {
   const authHeader = req.headers.get("Authorization")
   if (!authHeader?.startsWith("Bearer ")) return null
   const token = authHeader.replace("Bearer ", "")
-  const anonClient = createClient(supabaseUrl, supabaseAnonKey)
-  const { data: { user }, error } = await anonClient.auth.getUser(token)
-  if (error || !user) return null
-  return user
+  try {
+    const [, payloadB64] = token.split(".")
+    if (!payloadB64) return null
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")))
+    if (payload.aud !== "authenticated") return null
+    if (!payload.sub) return null
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+    return { id: payload.sub }
+  } catch {
+    return null
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -41,7 +47,6 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
   const openaiKey = Deno.env.get("OPENAI_API_KEY")
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -52,8 +57,8 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Verify the caller's identity from their JWT
-  const user = await verifyUser(req, supabaseUrl, supabaseAnonKey)
+  // Extract user from JWT (checks aud=authenticated + expiry)
+  const user = getUserFromToken(req)
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,

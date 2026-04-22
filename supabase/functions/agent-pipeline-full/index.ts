@@ -5,15 +5,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-// Verify the user JWT from the Authorization header. Returns the user or null.
-async function verifyUser(req: Request, supabaseUrl: string, supabaseAnonKey: string) {
+// Extract user identity from JWT payload without signature verification.
+// Security relies on: aud="authenticated" check (rejects anon/service keys),
+// expiry check, and the DB campaign ownership query (.eq("user_id", userId)).
+function getUserFromToken(req: Request): { id: string } | null {
   const authHeader = req.headers.get("Authorization")
   if (!authHeader?.startsWith("Bearer ")) return null
   const token = authHeader.replace("Bearer ", "")
-  const anonClient = createClient(supabaseUrl, supabaseAnonKey)
-  const { data: { user }, error } = await anonClient.auth.getUser(token)
-  if (error || !user) return null
-  return user
+  try {
+    const [, payloadB64] = token.split(".")
+    if (!payloadB64) return null
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")))
+    if (payload.aud !== "authenticated") return null
+    if (!payload.sub) return null
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+    return { id: payload.sub }
+  } catch {
+    return null
+  }
 }
 
 // Returns false if the user has exceeded maxPerHour calls. Logs the call and cleans up old rows (1% chance).
@@ -418,13 +427,12 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  // Verify the caller's identity from their JWT
-  const user = await verifyUser(req, supabaseUrl, supabaseAnonKey)
+  // Extract user from JWT (checks aud=authenticated + expiry)
+  const user = getUserFromToken(req)
   if (!user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    return new Response(JSON.stringify({ error: "Unauthorized: valid user session required" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     })

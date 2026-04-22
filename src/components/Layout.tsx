@@ -1,14 +1,13 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Users, Settings, MessageSquare, Zap, LogOut } from "lucide-react"
+import { LayoutDashboard, Users, Settings, LogOut, BookSearch } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/leads", label: "Leads", icon: Users },
   { path: "/settings", label: "Settings", icon: Settings },
-  { path: "/chat", label: "Chat", icon: MessageSquare },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -27,8 +26,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside className="w-64 border-r bg-card flex flex-col">
         <div className="p-6 border-b">
           <div className="flex items-center gap-2">
-            <div className="bg-primary rounded-lg p-1.5">
-              <Zap className="h-5 w-5 text-primary-foreground" />
+            <div className="bg-[#00070a] rounded-lg p-1.5">
+              <BookSearch className="h-5 w-5 text-primary-foreground" />
             </div>
             <span className="font-bold text-lg">PROSPECTFLOW AI</span>
           </div>

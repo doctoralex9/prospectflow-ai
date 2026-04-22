@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
           industry: lead.lead_category,
           location: (lead.raw_data as Record<string, unknown>)?.location,
           email: lead.email,
-          phone: lead.phone,
+          lead_phone: lead.phone,
         })
 
         const message = await callAI(
