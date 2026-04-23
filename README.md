@@ -89,8 +89,8 @@ npm run dev
 
 | Route | Description |
 |-------|-------------|
-| `/` | Dashboard — stats cards, enrichment pie chart, status bar chart, recent pipeline runs |
-| `/leads` | Lead pipeline runner, progress tracker, leads table with search/filter, detail modal, Excel export |
+| `/` | Dashboard — hero section, stats overview, enrichment sources, recent pipeline runs |
+| `/leads` | Lead pipeline runner, progress tracker, leads table with search, detail modal, Excel export |
 | `/settings` | Campaign CRUD with AI wizard, agent prompt editor, API keys |
 | `/auth` | Email/password login and signup |
 
