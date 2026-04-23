@@ -5,7 +5,7 @@ AI-powered B2B lead generation platform with a 6-step automated pipeline.
 ## Stack
 - Frontend: React + TypeScript + Vite + Tailwind CSS
 - Backend: Supabase (PostgreSQL + Edge Functions / Deno)
-- AI: OpenAI (gpt-4o-mini / gpt-4o), Perplexity AI, Firecrawl, Apollo.io
+- AI: OpenAI (gpt-4o-mini / gpt-4o), Perplexity AI, Firecrawl, Apollo.io, Tavily API
 
 ## Setup
 
