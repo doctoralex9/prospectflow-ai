@@ -12,6 +12,8 @@ import {
   Users, Mail, Phone, Clock, CheckCircle2, XCircle, Loader2,
   BookSearch, Settings, ChevronDown, Play, LogOut,
 } from "lucide-react"
+import StarField from "@/components/StarField"
+import RobotCharacter from "@/components/RobotCharacter"
 
 interface LeadStats {
   total: number
@@ -30,6 +32,20 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<LeadStats | null>(null)
   const [recentJobs, setRecentJobs] = useState<(ScrapeJob & { campaigns?: { name: string } })[]>([])
   const [loading, setLoading] = useState(true)
+  const [robotPos, setRobotPos] = useState({ x: 78, y: 58 })
+
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>
+    const wander = () => {
+      setRobotPos({
+        x: 8 + Math.random() * 76,
+        y: 8 + Math.random() * 68,
+      })
+      t = setTimeout(wander, 3200 + Math.random() * 3800)
+    }
+    t = setTimeout(wander, 1800)
+    return () => clearTimeout(t)
+  }, [])
 
   useEffect(() => {
     if (user) {
@@ -161,8 +177,27 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════
           Section 1 — Hero
       ══════════════════════════════════════════════════════ */}
-      <section className="min-h-screen flex flex-col items-center justify-center px-6 relative">
-        <div className="text-center space-y-6 max-w-2xl mx-auto">
+      <section className="min-h-screen flex flex-col items-center justify-center px-6 relative bg-[#04060f] overflow-hidden">
+
+        {/* Star field — fills the section */}
+        <StarField />
+
+        {/* Robot — wanders around the hero */}
+        <div
+          className="absolute opacity-60 pointer-events-none select-none"
+          style={{
+            left: `${robotPos.x}%`,
+            top: `${robotPos.y}%`,
+            transition: "left 2.8s ease-in-out, top 2.8s ease-in-out",
+          }}
+        >
+          <div className="-translate-x-1/2 -translate-y-1/2">
+            <RobotCharacter />
+          </div>
+        </div>
+
+        {/* Main content — above stars and robot */}
+        <div className="relative z-10 text-center space-y-6 max-w-2xl mx-auto">
           <div className="bg-primary/10 rounded-2xl p-5 w-fit mx-auto border border-primary/20">
             <BookSearch className="h-12 w-12 text-primary" />
           </div>
@@ -190,7 +225,7 @@ export default function DashboardPage() {
         </div>
 
         {/* How it works */}
-        <div className="mt-20 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto w-full">
+        <div className="relative z-10 mt-16 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto w-full">
           {[
             { step: "01", title: "Search or Paste", desc: "Use AI Search, paste URLs, or drop raw text from any website" },
             { step: "02", title: "AI Extracts", desc: "6-step pipeline pulls business names, emails, and phones automatically" },
@@ -208,7 +243,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Scroll indicator */}
-        <div className="absolute bottom-10 text-muted-foreground/40 animate-bounce">
+        <div className="absolute bottom-10 z-10 text-muted-foreground/40 animate-bounce">
           <ChevronDown className="h-5 w-5" />
         </div>
       </section>
@@ -216,8 +251,9 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════
           Section 2 — Stats
       ══════════════════════════════════════════════════════ */}
-      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
-        <div className="max-w-4xl mx-auto w-full space-y-10">
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20 bg-[#04060f] relative overflow-hidden">
+        <StarField />
+        <div className="relative z-10 max-w-4xl mx-auto w-full space-y-10">
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
               <p className="text-xs font-mono text-primary uppercase tracking-widest">Your Numbers</p>
@@ -264,8 +300,9 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════
           Section 3 — Enrichment Sources
       ══════════════════════════════════════════════════════ */}
-      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
-        <div className="max-w-4xl mx-auto w-full space-y-10">
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20 bg-[#04060f] relative overflow-hidden">
+        <StarField />
+        <div className="relative z-10 max-w-4xl mx-auto w-full space-y-10">
           <div>
             <p className="text-xs font-mono text-primary uppercase tracking-widest">Breakdown</p>
             <h2 className="text-3xl font-bold mt-1">Enrichment Sources</h2>
@@ -315,8 +352,9 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════
           Section 4 — Recent Pipeline Runs
       ══════════════════════════════════════════════════════ */}
-      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
-        <div className="max-w-4xl mx-auto w-full space-y-10">
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20 bg-[#04060f] relative overflow-hidden">
+        <StarField />
+        <div className="relative z-10 max-w-4xl mx-auto w-full space-y-10">
           <div>
             <p className="text-xs font-mono text-primary uppercase tracking-widest">Activity</p>
             <h2 className="text-3xl font-bold mt-1">Recent Pipeline Runs</h2>

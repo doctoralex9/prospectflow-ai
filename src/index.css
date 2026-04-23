@@ -134,3 +134,21 @@ body {
   opacity: 0;
   animation: slide-in-left 0.28s ease-out both;
 }
+
+/* Robot float */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-11px); }
+}
+.animate-float {
+  animation: float 5s ease-in-out infinite;
+}
+
+/* Robot antenna LED blink */
+@keyframes blink-led {
+  0%, 85%, 100% { opacity: 1; }
+  90%           { opacity: 0.08; }
+}
+.animate-blink-led {
+  animation: blink-led 3.5s ease-in-out infinite;
+}

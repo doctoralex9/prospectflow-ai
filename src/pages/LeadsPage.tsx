@@ -18,6 +18,8 @@ import {
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { toast } from "@/hooks/use-toast"
+import StarField from "@/components/StarField"
+import RegressionCanvas from "@/components/RegressionCanvas"
 
 interface PipelineStep {
   step: number
@@ -285,7 +287,14 @@ export default function LeadsPage() {
   const parsedUrlCount = parseUrls(urlInput).length
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6 page-enter">
+    <>
+      {/* Fixed star field behind everything */}
+      <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 1 }}>
+        <StarField />
+      </div>
+      {/* Live regression canvas — lights up while pipeline runs */}
+      <RegressionCanvas active={pipelineRunning} />
+      <div className="relative p-4 md:p-6 space-y-4 md:space-y-6 page-enter" style={{ zIndex: 10 }}>
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -786,6 +795,7 @@ export default function LeadsPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </>
   )
 }

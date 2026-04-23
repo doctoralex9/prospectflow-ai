@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key, RefreshCw, ExternalLink, ArrowLeft } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "@/hooks/use-toast"
+import StarField from "@/components/StarField"
 
 function buildAgentConfigs(product: string, target: string, language: string) {
   const langLine =
@@ -317,7 +318,11 @@ export default function SettingsPage() {
   const wizardReady = wizard.product.trim().length > 2 && wizard.target.trim().length > 2
 
   return (
-    <div className="p-4 md:p-6 space-y-6 page-enter">
+    <>
+      <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 1 }}>
+        <StarField />
+      </div>
+    <div className="relative p-4 md:p-6 space-y-6 page-enter" style={{ zIndex: 10 }}>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -594,6 +599,7 @@ export default function SettingsPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </>
   )
 }
 
