@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/useAuth"
 import type { Campaign, Lead } from "@/types/database"
@@ -13,7 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
   Play, Download, Search, CheckCircle2, Circle, Loader2,
-  Mail, Phone, Globe, MapPin, User, Building2, X, Link, ChevronDown, ChevronUp, Copy, Check
+  Mail, Phone, Globe, MapPin, User, Building2, X, Link, ChevronDown, ChevronUp, Copy, Check, Trash2, ArrowLeft
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { toast } from "@/hooks/use-toast"
@@ -37,12 +38,12 @@ const INITIAL_STEPS: PipelineStep[] = [
 
 export default function LeadsPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("")
   const [leads, setLeads] = useState<Lead[]>([])
   const [filteredLeads, setFilteredLeads] = useState<Lead[]>([])
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
   const [loading, setLoading] = useState(false)
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [steps, setSteps] = useState<PipelineStep[]>(INITIAL_STEPS.map(s => ({ ...s })))
@@ -84,11 +85,8 @@ export default function LeadsPage() {
         (l.raw_data as Record<string, unknown>)?.location?.toString().toLowerCase().includes(q)
       )
     }
-    if (statusFilter !== "all") {
-      result = result.filter(l => l.status === statusFilter)
-    }
     setFilteredLeads(result)
-  }, [leads, search, statusFilter])
+  }, [leads, search])
 
   async function loadCampaigns() {
     const { data } = await supabase
@@ -235,12 +233,6 @@ export default function LeadsPage() {
     setPipelineRunning(false)
   }
 
-  async function updateLeadStatus(leadId: string, status: string) {
-    await supabase.from("leads").update({ status }).eq("id", leadId)
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status } : l))
-    if (selectedLead?.id === leadId) setSelectedLead(prev => prev ? { ...prev, status } : null)
-  }
-
   async function saveNotes() {
     if (!selectedLead) return
     setSavingNotes(true)
@@ -251,6 +243,23 @@ export default function LeadsPage() {
     toast({ title: "Notes saved" })
   }
 
+  async function deleteLead(leadId: string) {
+    if (!confirm("Delete this lead? This cannot be undone.")) return
+    await supabase.from("leads").delete().eq("id", leadId)
+    setLeads(prev => prev.filter(l => l.id !== leadId))
+    if (selectedLead?.id === leadId) setSelectedLead(null)
+    toast({ title: "Lead deleted" })
+  }
+
+  async function deleteAllLeads() {
+    if (!selectedCampaignId || leads.length === 0) return
+    const count = leads.length
+    if (!confirm(`Delete all ${count} lead${count !== 1 ? "s" : ""} in this campaign? This cannot be undone.`)) return
+    await supabase.from("leads").delete().eq("campaign_id", selectedCampaignId)
+    setLeads([])
+    toast({ title: `Deleted ${count} lead${count !== 1 ? "s" : ""}`, variant: "destructive" })
+  }
+
   function exportLeads() {
     const data = filteredLeads.map(l => ({
       "Company": l.company_name,
@@ -258,7 +267,6 @@ export default function LeadsPage() {
       "Role": l.contact_role,
       "Email": l.email,
       "Phone": l.phone,
-      "Status": l.status,
       "Category": l.lead_category,
       "Enrichment Source": l.enrichment_source,
       "Source URL": l.source_url,
@@ -277,14 +285,22 @@ export default function LeadsPage() {
   const parsedUrlCount = parseUrls(urlInput).length
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6 page-enter">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Leads</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Paste URLs, run the pipeline, get contacts</p>
-        </div>
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-accent"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold">Leads</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Paste URLs, run the pipeline, get contacts</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
           <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
             <SelectTrigger className="w-60">
               <SelectValue placeholder="Select campaign..." />
@@ -297,6 +313,9 @@ export default function LeadsPage() {
           </Select>
           <Button variant="outline" onClick={exportLeads} disabled={filteredLeads.length === 0}>
             <Download className="h-4 w-4 mr-2" /> Export
+          </Button>
+          <Button variant="destructive" onClick={deleteAllLeads} disabled={leads.length === 0}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete All
           </Button>
         </div>
       </div>
@@ -516,7 +535,7 @@ export default function LeadsPage() {
       )}
 
       {/* Filters */}
-      <div className="flex gap-3 items-center">
+      <div className="flex gap-2 items-center flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -526,18 +545,6 @@ export default function LeadsPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="new">New</SelectItem>
-            <SelectItem value="contacted">Contacted</SelectItem>
-            <SelectItem value="qualified">Qualified</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
         <span className="text-sm text-muted-foreground whitespace-nowrap">{filteredLeads.length} lead{filteredLeads.length !== 1 ? "s" : ""}</span>
       </div>
 
@@ -557,7 +564,8 @@ export default function LeadsPage() {
         </div>
       ) : (
         <div className="border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-muted/50 border-b">
               <tr>
                 <th className="text-left p-3 font-medium text-muted-foreground">Company</th>
@@ -565,7 +573,7 @@ export default function LeadsPage() {
                 <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
                 <th className="text-left p-3 font-medium text-muted-foreground">Phone</th>
                 <th className="text-left p-3 font-medium text-muted-foreground">Source</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
+                <th className="w-10 p-3" />
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -623,22 +631,19 @@ export default function LeadsPage() {
                     )}
                   </td>
                   <td className="p-3" onClick={e => e.stopPropagation()}>
-                    <Select value={lead.status || "new"} onValueChange={v => updateLeadStatus(lead.id, v)}>
-                      <SelectTrigger className="h-7 w-32 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="new">New</SelectItem>
-                        <SelectItem value="contacted">Contacted</SelectItem>
-                        <SelectItem value="qualified">Qualified</SelectItem>
-                        <SelectItem value="rejected">Rejected</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <button
+                      onClick={() => deleteLead(lead.id)}
+                      className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+                      title="Delete lead"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -758,22 +763,6 @@ export default function LeadsPage() {
                 </div>
               )}
 
-              {/* Status */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium uppercase text-muted-foreground tracking-wide">Status</Label>
-                <Select value={selectedLead.status || "new"} onValueChange={v => updateLeadStatus(selectedLead.id, v)}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="contacted">Contacted</SelectItem>
-                    <SelectItem value="qualified">Qualified</SelectItem>
-                    <SelectItem value="rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Notes */}
               <div className="space-y-2">
                 <Label className="text-xs font-medium uppercase text-muted-foreground tracking-wide">Notes</Label>
@@ -784,9 +773,14 @@ export default function LeadsPage() {
                   rows={3}
                   className="resize-none"
                 />
-                <Button size="sm" onClick={saveNotes} disabled={savingNotes}>
-                  {savingNotes ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving...</> : "Save Notes"}
-                </Button>
+                <div className="flex items-center justify-between gap-2">
+                  <Button size="sm" onClick={saveNotes} disabled={savingNotes}>
+                    {savingNotes ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving...</> : "Save Notes"}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => deleteLead(selectedLead.id)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete Lead
+                  </Button>
+                </div>
               </div>
             </div>
           )}

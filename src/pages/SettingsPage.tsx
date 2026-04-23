@@ -11,7 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key, RefreshCw, ExternalLink } from "lucide-react"
+import { Plus, Trash2, Edit2, Loader2, Database, Sparkles, Key, RefreshCw, ExternalLink, ArrowLeft } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "@/hooks/use-toast"
 
 function buildAgentConfigs(product: string, target: string, language: string) {
@@ -80,6 +81,7 @@ ${langLine}`,
 
 export default function SettingsPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("")
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
@@ -315,10 +317,18 @@ export default function SettingsPage() {
   const wizardReady = wizard.product.trim().length > 2 && wizard.target.trim().length > 2
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <div className="flex gap-2">
+    <div className="p-4 md:p-6 space-y-6 page-enter">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-accent"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <h1 className="text-2xl font-bold">Settings</h1>
+        </div>
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={loadSampleData} disabled={seedingDemo}>
             {seedingDemo ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Database className="h-4 w-4 mr-2" />}
             Load Sample Data
@@ -329,9 +339,9 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col lg:flex-row gap-6">
         {/* Campaign list */}
-        <div className="w-64 space-y-1">
+        <div className="w-full lg:w-64 space-y-1 shrink-0">
           <p className="text-xs font-medium text-muted-foreground uppercase px-2 pb-1">Campaigns</p>
           {campaigns.length === 0 ? (
             <div className="text-sm text-muted-foreground p-2">No campaigns yet</div>
@@ -368,7 +378,7 @@ export default function SettingsPage() {
                     <CardDescription>Configure your campaign's targeting and ICP</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Campaign Name</Label>
                         <Input
@@ -459,7 +469,7 @@ export default function SettingsPage() {
           <CardDescription className="text-xs">Stored locally in your browser — never sent to our servers</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Tavily API Key</Label>
               <Input

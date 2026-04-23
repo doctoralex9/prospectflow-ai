@@ -1,29 +1,30 @@
 import { useState, useEffect } from "react"
+import { Link, useNavigate } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/useAuth"
 import type { Campaign, ScrapeJob } from "@/types/database"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer
-} from "recharts"
-import { Users, Mail, Phone, TrendingUp, Clock, CheckCircle2, XCircle, Loader2 } from "lucide-react"
+  Users, Mail, Phone, Clock, CheckCircle2, XCircle, Loader2,
+  BookSearch, Settings, ChevronDown, Play, LogOut,
+} from "lucide-react"
 
 interface LeadStats {
   total: number
   withEmail: number
   withPhone: number
-  converted: number
-  byStatus: Record<string, number>
   byEnrichmentSource: Record<string, number>
 }
 
 const COLORS = ["#294551", "#528ba3", "#393B81", "#754195", "#D1B8E0"]
 
 export default function DashboardPage() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all")
   const [stats, setStats] = useState<LeadStats | null>(null)
@@ -62,7 +63,7 @@ export default function DashboardPage() {
         .eq("user_id", user!.id)
       const ids = userCampaigns?.map(c => c.id) || []
       if (ids.length === 0) {
-        setStats({ total: 0, withEmail: 0, withPhone: 0, converted: 0, byStatus: {}, byEnrichmentSource: {} })
+        setStats({ total: 0, withEmail: 0, withPhone: 0, byEnrichmentSource: {} })
         setLoading(false)
         return
       }
@@ -72,19 +73,10 @@ export default function DashboardPage() {
     }
 
     const { data: leads } = await query
+    if (!leads) { setLoading(false); return }
 
-    if (!leads) {
-      setLoading(false)
-      return
-    }
-
-    const byStatus: Record<string, number> = {}
     const byEnrichmentSource: Record<string, number> = {}
-
     for (const lead of leads) {
-      const status = lead.status || "new"
-      byStatus[status] = (byStatus[status] || 0) + 1
-
       const src = lead.enrichment_source || "unknown"
       byEnrichmentSource[src] = (byEnrichmentSource[src] || 0) + 1
     }
@@ -93,8 +85,6 @@ export default function DashboardPage() {
       total: leads.length,
       withEmail: leads.filter(l => l.email).length,
       withPhone: leads.filter(l => l.phone).length,
-      converted: byStatus["qualified"] || 0,
-      byStatus,
       byEnrichmentSource,
     })
     setLoading(false)
@@ -115,24 +105,29 @@ export default function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(10)
 
-    if (data) setRecentJobs(data as (ScrapeJob & { campaigns?: { name: string } })[])
+    if (data) {
+      const staleThreshold = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+      const staleIds = data
+        .filter(j => j.status === "running" && j.created_at < staleThreshold)
+        .map(j => j.id)
+
+      if (staleIds.length > 0) {
+        await supabase.from("scrape_jobs").update({ status: "failed" }).in("id", staleIds)
+        setRecentJobs(
+          data.map(j => staleIds.includes(j.id) ? { ...j, status: "failed" } : j) as (ScrapeJob & { campaigns?: { name: string } })[]
+        )
+      } else {
+        setRecentJobs(data as (ScrapeJob & { campaigns?: { name: string } })[])
+      }
+    }
   }
 
   const sourceChartData = stats
     ? Object.entries(stats.byEnrichmentSource).map(([name, value]) => ({ name, value }))
     : []
 
-  const statusChartData = stats
-    ? Object.entries(stats.byStatus).map(([name, value]) => ({ name, value }))
-    : []
-
   const statCards = [
-    {
-      title: "Total Leads",
-      value: stats?.total ?? 0,
-      icon: Users,
-      desc: "across all campaigns",
-    },
+    { title: "Total Leads", value: stats?.total ?? 0, icon: Users, desc: "across all campaigns" },
     {
       title: "With Email",
       value: stats ? `${Math.round((stats.withEmail / Math.max(stats.total, 1)) * 100)}%` : "0%",
@@ -145,158 +140,235 @@ export default function DashboardPage() {
       icon: Phone,
       desc: `${stats?.withPhone ?? 0} leads`,
     },
-    {
-      title: "Qualified",
-      value: stats?.converted ?? 0,
-      icon: TrendingUp,
-      desc: "marked as qualified",
-    },
   ]
 
+  const handleSignOut = async () => {
+    await signOut()
+    navigate("/auth")
+  }
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-          <SelectTrigger className="w-56">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Campaigns</SelectItem>
-            {campaigns.map(c => (
-              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="page-enter">
+
+      {/* ── Minimal top-right controls ──────────────────────── */}
+      <div className="fixed top-0 right-0 z-20 flex items-center gap-2 p-4">
+        <span className="text-xs text-muted-foreground hidden sm:block truncate max-w-[180px]">{user?.email}</span>
+        <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-muted-foreground hover:text-foreground">
+          <LogOut className="h-4 w-4" />
+        </Button>
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      {/* ══════════════════════════════════════════════════════
+          Section 1 — Hero
+      ══════════════════════════════════════════════════════ */}
+      <section className="min-h-screen flex flex-col items-center justify-center px-6 relative">
+        <div className="text-center space-y-6 max-w-2xl mx-auto">
+          <div className="bg-primary/10 rounded-2xl p-5 w-fit mx-auto border border-primary/20">
+            <BookSearch className="h-12 w-12 text-primary" />
+          </div>
+
+          <div>
+            <h1 className="text-4xl md:text-6xl font-bold tracking-tight">PROSPECTFLOW AI</h1>
+            <p className="text-lg md:text-xl text-muted-foreground mt-4 leading-relaxed">
+              AI-powered B2B lead generation.<br className="hidden sm:block" />
+              Search, extract, and reach the right businesses — all in one place.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+            <Link to="/leads">
+              <Button size="lg" className="gap-2 w-full sm:w-auto">
+                <Play className="h-4 w-4" /> Run Pipeline
+              </Button>
+            </Link>
+            <Link to="/settings">
+              <Button size="lg" variant="outline" className="gap-2 w-full sm:w-auto">
+                <Settings className="h-4 w-4" /> Settings
+              </Button>
+            </Link>
+          </div>
         </div>
-      ) : (
-        <>
-          {/* Stat cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {statCards.map(card => (
-              <Card key={card.title}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardDescription>{card.title}</CardDescription>
-                    <card.icon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{card.value}</div>
-                  <p className="text-xs text-muted-foreground mt-1">{card.desc}</p>
-                </CardContent>
-              </Card>
-            ))}
+
+        {/* How it works */}
+        <div className="mt-20 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto w-full">
+          {[
+            { step: "01", title: "Search or Paste", desc: "Use AI Search, paste URLs, or drop raw text from any website" },
+            { step: "02", title: "AI Extracts", desc: "6-step pipeline pulls business names, emails, and phones automatically" },
+            { step: "03", title: "Send Outreach", desc: "Personalized messages written by AI, ready to send in seconds" },
+          ].map(item => (
+            <div
+              key={item.step}
+              className="bg-card/40 backdrop-blur-sm border border-white/5 rounded-xl p-5 text-left"
+            >
+              <span className="text-xs font-mono text-primary tracking-widest">{item.step}</span>
+              <h3 className="font-semibold mt-2 text-sm">{item.title}</h3>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Scroll indicator */}
+        <div className="absolute bottom-10 text-muted-foreground/40 animate-bounce">
+          <ChevronDown className="h-5 w-5" />
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════
+          Section 2 — Stats
+      ══════════════════════════════════════════════════════ */}
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
+        <div className="max-w-4xl mx-auto w-full space-y-10">
+          <div className="flex items-end justify-between flex-wrap gap-4">
+            <div>
+              <p className="text-xs font-mono text-primary uppercase tracking-widest">Your Numbers</p>
+              <h2 className="text-3xl font-bold mt-1">Pipeline Overview</h2>
+            </div>
+            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+              <SelectTrigger className="w-52 bg-card/40 backdrop-blur-sm border-white/10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Campaigns</SelectItem>
+                {campaigns.map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Enrichment Sources</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {sourceChartData.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">No data yet</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={sourceChartData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={55}
-                        outerRadius={85}
-                        paddingAngle={3}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${Math.round((percent ?? 0) * 100)}%`}
-                        labelLine={false}
-                      >
-                        {sourceChartData.map((_, index) => (
-                          <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 stagger-children">
+              {statCards.map(card => (
+                <Card key={card.title} className="bg-card/40 backdrop-blur-sm border-white/5">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardDescription>{card.title}</CardDescription>
+                      <card.icon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-bold">{card.value}</div>
+                    <p className="text-xs text-muted-foreground mt-1">{card.desc}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Lead Status</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {statusChartData.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">No data yet</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={statusChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
+      {/* ══════════════════════════════════════════════════════
+          Section 3 — Enrichment Sources
+      ══════════════════════════════════════════════════════ */}
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
+        <div className="max-w-4xl mx-auto w-full space-y-10">
+          <div>
+            <p className="text-xs font-mono text-primary uppercase tracking-widest">Breakdown</p>
+            <h2 className="text-3xl font-bold mt-1">Enrichment Sources</h2>
           </div>
 
-          {/* Recent pipeline runs */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recent Pipeline Runs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {recentJobs.length === 0 ? (
-                <div className="text-center py-6 text-muted-foreground text-sm">No pipeline runs yet</div>
+          <Card className="bg-card/40 backdrop-blur-sm border-white/5">
+            <CardContent className="pt-6">
+              {sourceChartData.length === 0 ? (
+                <div className="text-center py-16 text-muted-foreground text-sm">No data yet</div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="text-left pb-2 font-medium">Campaign</th>
-                      <th className="text-left pb-2 font-medium">Status</th>
-                      <th className="text-left pb-2 font-medium">Pages</th>
-                      <th className="text-left pb-2 font-medium">Leads</th>
-                      <th className="text-left pb-2 font-medium">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentJobs.map(job => (
-                      <tr key={job.id} className="border-b last:border-0">
-                        <td className="py-2">{job.campaigns?.name || "—"}</td>
-                        <td className="py-2">
-                          <div className="flex items-center gap-1">
-                            {job.status === "completed" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
-                            {job.status === "failed" && <XCircle className="h-3 w-3 text-destructive" />}
-                            {job.status === "running" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
-                            {job.status === "pending" && <Clock className="h-3 w-3 text-muted-foreground" />}
-                            <Badge variant={job.status === "completed" ? "success" : job.status === "failed" ? "destructive" : "secondary"}>
-                              {job.status}
-                            </Badge>
-                          </div>
-                        </td>
-                        <td className="py-2">{job.pages_scraped}</td>
-                        <td className="py-2">{job.leads_found}</td>
-                        <td className="py-2 text-muted-foreground">
-                          {new Date(job.created_at).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <>
+                  {/* Mobile: total count */}
+                  <div className="flex flex-col items-center justify-center py-8 md:hidden">
+                    <span className="text-6xl font-bold">{stats?.total ?? 0}</span>
+                    <span className="text-sm text-muted-foreground mt-2">total leads</span>
+                  </div>
+                  {/* Desktop: pie chart */}
+                  <div className="hidden md:block">
+                    <ResponsiveContainer width="100%" height={320}>
+                      <PieChart>
+                        <Pie
+                          data={sourceChartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={75}
+                          outerRadius={115}
+                          paddingAngle={3}
+                          dataKey="value"
+                          label={({ name, percent }) => `${name} ${Math.round((percent ?? 0) * 100)}%`}
+                          labelLine={false}
+                        >
+                          {sourceChartData.map((_, index) => (
+                            <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
-        </>
-      )}
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════
+          Section 4 — Recent Pipeline Runs
+      ══════════════════════════════════════════════════════ */}
+      <section className="min-h-screen flex flex-col justify-center px-6 py-20">
+        <div className="max-w-4xl mx-auto w-full space-y-10">
+          <div>
+            <p className="text-xs font-mono text-primary uppercase tracking-widest">Activity</p>
+            <h2 className="text-3xl font-bold mt-1">Recent Pipeline Runs</h2>
+          </div>
+
+          <Card className="bg-card/40 backdrop-blur-sm border-white/5">
+            <CardContent className="pt-6">
+              {recentJobs.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground text-sm">No pipeline runs yet</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[480px]">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="text-left pb-3 font-medium">Campaign</th>
+                        <th className="text-left pb-3 font-medium">Status</th>
+                        <th className="text-left pb-3 font-medium">Pages</th>
+                        <th className="text-left pb-3 font-medium">Leads</th>
+                        <th className="text-left pb-3 font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentJobs.map(job => (
+                        <tr key={job.id} className="border-b last:border-0">
+                          <td className="py-3">{job.campaigns?.name || "—"}</td>
+                          <td className="py-3">
+                            <div className="flex items-center gap-1.5">
+                              {job.status === "completed" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                              {job.status === "failed" && <XCircle className="h-3 w-3 text-destructive" />}
+                              {job.status === "running" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
+                              {job.status === "pending" && <Clock className="h-3 w-3 text-muted-foreground" />}
+                              <Badge variant={job.status === "completed" ? "success" : job.status === "failed" ? "destructive" : "secondary"}>
+                                {job.status}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="py-3">{job.pages_scraped}</td>
+                          <td className="py-3">{job.leads_found}</td>
+                          <td className="py-3 text-muted-foreground text-xs">
+                            {new Date(job.created_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
     </div>
   )
 }

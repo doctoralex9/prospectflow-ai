@@ -51,24 +51,28 @@
 }
 
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
+  /* Background: deep navy — the darkest layer */
+  --background: 222 52% 4%;
+  /* Foreground: soft slate-white instead of harsh pure white */
+  --foreground: 210 22% 83%;
+  /* Card: visually elevated above background */
+  --card: 220 44% 7.5%;
+  --card-foreground: 210 22% 83%;
+  --popover: 220 44% 7.5%;
+  --popover-foreground: 210 22% 83%;
   --primary: 217.2 91.2% 59.8%;
   --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
+  --secondary: 217 28% 14%;
+  --secondary-foreground: 210 22% 83%;
+  --muted: 217 28% 12%;
+  --muted-foreground: 215 16% 52%;
+  --accent: 217 28% 13%;
+  --accent-foreground: 210 22% 83%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
+  /* Border: noticeably visible but not distracting */
+  --border: 220 30% 17%;
+  --input: 220 30% 12%;
   --ring: 224.3 76.3% 48%;
 }
 
@@ -81,4 +85,52 @@ body {
   color: hsl(var(--foreground));
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Slim, professional scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+/* ── Animations ─────────────────────────────────────────── */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Applied to the top-level page div — triggers on route change */
+.page-enter {
+  animation: fade-up 0.32s ease-out both;
+}
+
+/* Applied to a grid container; each child staggers in */
+.stagger-children > * {
+  opacity: 0;
+  animation: fade-up 0.35s ease-out both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 55ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 110ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 165ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 220ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 275ms; }
+
+/* Sidebar nav items slide in from left */
+.sidebar-nav-item {
+  opacity: 0;
+  animation: slide-in-left 0.28s ease-out both;
 }
