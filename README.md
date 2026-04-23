@@ -28,6 +28,8 @@ In Supabase Dashboard → Settings → Edge Functions → Secrets, add:
 - `PERPLEXITY_API_KEY`
 - `FIRECRAWL_KEY`
 - `APOLLO_API_KEY`
+- `GOOGLE_PLACES_API_KEY`
+- `TAVILY_API_KEY`
 
 ### 4. Deploy Edge Functions
 ```bash
