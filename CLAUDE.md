@@ -6,6 +6,8 @@ AI-powered B2B lead generation platform. User searches, pastes, or provides URLs
 Target market: Greek B2B (restaurants, catering, lawyers, dentists, hotels).
 Distribution: TikTok demos → DM-based sales.
 
+**Note:** TikTok content strategy (how to record, edit in CapCut, upload, etc.) is discussed separately in a browser Claude conversation — not Claude Code. Claude Code is only for app development tasks.
+
 GitHub: https://github.com/doctoralex9/prospectflow-ai
 
 ---
@@ -146,13 +148,16 @@ When a directory page is scraped (e.g. `cretehotels.gr/list`), the AI sometimes 
 
 ## What To Build Next (in priority order)
 
-### 1. Stripe one-time payment
-€97 one-time, 1000 lead credits, never expire.
-Top-up: €47 for 500 more credits.
-Not needed until first clients validated via DM.
-
-### 2. Landing page
+### 1. Landing page
 Only after product validated with paying clients.
+
+---
+
+## Pricing Model
+
+There is **no fixed pricing or payment system** (Stripe or otherwise).
+Pricing is negotiated manually per client depending on their needs, volume, and use case.
+Do not suggest or build any payment integration unless explicitly requested.
 
 ---
 
