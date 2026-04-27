@@ -5,24 +5,17 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-// Extract user identity from JWT payload without signature verification.
-// Security relies on: aud="authenticated" check (rejects anon/service keys),
-// expiry check, and the DB campaign ownership query (.eq("user_id", userId)).
-function getUserFromToken(req: Request): { id: string } | null {
-  const authHeader = req.headers.get("Authorization")
-  if (!authHeader?.startsWith("Bearer ")) return null
-  const token = authHeader.replace("Bearer ", "")
-  try {
-    const [, payloadB64] = token.split(".")
-    if (!payloadB64) return null
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")))
-    if (payload.aud !== "authenticated") return null
-    if (!payload.sub) return null
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
-    return { id: payload.sub }
-  } catch {
-    return null
-  }
+// Verify the caller's JWT against Supabase's JWKS. This is a real signature
+// check — base64-decoding the payload (which we used to do) accepts forged
+// tokens, so we let the auth server validate it.
+// deno-lint-ignore no-explicit-any
+async function verifyUser(supabase: any, req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? ""
+  const token = authHeader.replace(/^Bearer\s+/i, "")
+  if (!token) return null
+  const { data, error } = await supabase.auth.getUser(token)
+  if (error || !data?.user) return null
+  return { id: data.user.id }
 }
 
 // Returns false if the user has exceeded maxPerHour calls. Logs the call and cleans up old rows (1% chance).
@@ -429,8 +422,8 @@ Deno.serve(async (req) => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  // Extract user from JWT (checks aud=authenticated + expiry)
-  const user = getUserFromToken(req)
+  // Verify JWT signature against Supabase auth — rejects forged tokens.
+  const user = await verifyUser(supabase, req)
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized: valid user session required" }), {
       status: 401,
@@ -636,12 +629,19 @@ Deno.serve(async (req) => {
         send(controller, "step", { step: 6, name: "PersistenceAgent", status: "done", message: `Saved ${savedCount} lead${savedCount !== 1 ? "s" : ""} to database` })
         send(controller, "complete", { total_leads: savedCount, job_id: jobId })
 
-        // Fire-and-forget outreach generation
-        fetch(`${supabaseUrl}/functions/v1/agent-outreach`, {
+        // Trigger outreach generation. `EdgeRuntime.waitUntil` keeps the
+        // worker alive after the SSE stream closes, otherwise the platform
+        // can kill the worker mid-fetch and outreach silently never runs.
+        const outreachPromise = fetch(`${supabaseUrl}/functions/v1/agent-outreach`, {
           method: "POST",
           headers: { Authorization: `Bearer ${supabaseServiceKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ campaign_id: campaignId, user_id: userId }),
+          body: JSON.stringify({ campaign_id: campaignId }),
         }).catch(e => console.error("Outreach trigger failed:", e))
+        // @ts-ignore EdgeRuntime is provided by Supabase's Deno runtime
+        if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+          // @ts-ignore
+          EdgeRuntime.waitUntil(outreachPromise)
+        }
 
       } catch (e) {
         console.error("Pipeline error:", e)

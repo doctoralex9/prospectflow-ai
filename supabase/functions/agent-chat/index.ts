@@ -5,21 +5,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-function getUserFromToken(req: Request): { id: string } | null {
-  const authHeader = req.headers.get("Authorization")
-  if (!authHeader?.startsWith("Bearer ")) return null
-  const token = authHeader.replace("Bearer ", "")
-  try {
-    const [, payloadB64] = token.split(".")
-    if (!payloadB64) return null
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")))
-    if (payload.aud !== "authenticated") return null
-    if (!payload.sub) return null
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
-    return { id: payload.sub }
-  } catch {
-    return null
-  }
+// Verify the caller's JWT signature against Supabase auth. Decoding the
+// payload manually (which we used to do) accepts forged tokens.
+// deno-lint-ignore no-explicit-any
+async function verifyUser(supabase: any, req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? ""
+  const token = authHeader.replace(/^Bearer\s+/i, "")
+  if (!token) return null
+  const { data, error } = await supabase.auth.getUser(token)
+  if (error || !data?.user) return null
+  return { id: data.user.id }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -57,8 +52,8 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Extract user from JWT (checks aud=authenticated + expiry)
-  const user = getUserFromToken(req)
+  // Verify JWT signature against Supabase auth — rejects forged tokens.
+  const user = await verifyUser(supabase, req)
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
@@ -95,8 +90,22 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Get or create session — always tied to the verified userId
-  if (!sessionId) {
+  // Get or create session — always tied to the verified userId.
+  // If the client passed a session_id, verify it belongs to this user, otherwise
+  // anyone with a forged or guessed UUID could read/write another user's chat.
+  if (sessionId) {
+    const { data: existingSession } = await supabase
+      .from("chat_sessions")
+      .select("user_id")
+      .eq("id", sessionId)
+      .single()
+    if (!existingSession || existingSession.user_id !== userId) {
+      return new Response(JSON.stringify({ error: "Session not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
+    }
+  } else {
     const { data: session } = await supabase
       .from("chat_sessions")
       .insert({ campaign_id: campaignId, user_id: userId, agent_type: agentType })

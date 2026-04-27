@@ -54,18 +54,48 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
   let campaignId: string
-  let userId: string
 
   try {
     const body = await req.json()
     campaignId = body.campaign_id
-    userId = body.user_id
     if (!campaignId) throw new Error("campaign_id required")
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     })
+  }
+
+  // Auth: this function accepts two callers —
+  //   1. Internal: agent-pipeline-full (or this function self-chaining) calling
+  //      with the service-role bearer. We trust those.
+  //   2. External: a user calling directly. We must verify their JWT and
+  //      confirm they own the campaign.
+  // Without this check, anyone with the function URL + the public anon key
+  // could burn OpenAI quota and overwrite outreach messages on any campaign.
+  const authHeader = req.headers.get("Authorization") ?? ""
+  const token = authHeader.replace(/^Bearer\s+/i, "")
+  const isServiceRole = token === supabaseServiceKey
+
+  if (!isServiceRole) {
+    const { data: authData, error: authErr } = await supabase.auth.getUser(token)
+    if (authErr || !authData?.user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
+    }
+    const { data: campaign } = await supabase
+      .from("campaigns")
+      .select("user_id")
+      .eq("id", campaignId)
+      .single()
+    if (!campaign || campaign.user_id !== authData.user.id) {
+      return new Response(JSON.stringify({ error: "Campaign not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      })
+    }
   }
 
   // Load content agent config
@@ -100,16 +130,22 @@ Deno.serve(async (req) => {
 
   for (let i = 0; i < leads.length; i += BATCH_SIZE) {
     if (Date.now() - startTime > TIMEOUT_BUDGET) {
-      // Self-chain: trigger ourselves again for remaining leads
+      // Self-chain: trigger ourselves again for remaining leads.
+      // waitUntil keeps the worker alive after we return so the chain lands.
       const supabaseFnUrl = `${supabaseUrl}/functions/v1/agent-outreach`
-      fetch(supabaseFnUrl, {
+      const chainPromise = fetch(supabaseFnUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${supabaseServiceKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ campaign_id: campaignId, user_id: userId }),
+        body: JSON.stringify({ campaign_id: campaignId }),
       }).catch(e => console.error("Self-chain trigger failed:", e))
+      // @ts-ignore EdgeRuntime is provided by Supabase's Deno runtime
+      if (typeof EdgeRuntime !== "undefined" && typeof EdgeRuntime.waitUntil === "function") {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(chainPromise)
+      }
       break
     }
 
