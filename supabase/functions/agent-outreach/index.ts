@@ -153,14 +153,20 @@ Deno.serve(async (req) => {
 
     await Promise.all(batch.map(async (lead) => {
       try {
+        const rawData = (lead.raw_data as Record<string, unknown>) || {}
+        const socialFound = (rawData.social_media_found as string[]) || []
+        const socialMissing = (rawData.social_media_missing as string[]) || []
+
         const leadContext = JSON.stringify({
           company_name: lead.company_name,
           contact_name: lead.contact_name,
           contact_role: lead.contact_role,
           industry: lead.lead_category,
-          location: (lead.raw_data as Record<string, unknown>)?.location,
+          location: rawData.location,
           email: lead.email,
           lead_phone: lead.phone,
+          social_media_present: socialFound.length > 0 ? socialFound : null,
+          social_media_missing: socialMissing.length > 0 ? socialMissing : null,
         })
 
         const message = await callAI(

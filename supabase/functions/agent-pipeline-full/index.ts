@@ -125,6 +125,19 @@ async function fetchWithPlainFetch(url: string): Promise<string> {
 
 const OTA_PATTERN = /booking\.com|airbnb\.com|tripadvisor\.|expedia\.com|hotels\.com|agoda\.com|vrbo\.com/gi
 
+const SOCIAL_PLATFORMS = [
+  { name: "Facebook", domains: ["facebook.com"] },
+  { name: "Instagram", domains: ["instagram.com"] },
+  { name: "TikTok", domains: ["tiktok.com"] },
+  { name: "LinkedIn", domains: ["linkedin.com"] },
+  { name: "YouTube", domains: ["youtube.com", "youtu.be"] },
+]
+
+function detectSocialFromHtml(html: string): string[] {
+  const lower = html.toLowerCase()
+  return SOCIAL_PLATFORMS.filter(p => p.domains.some(d => lower.includes(d))).map(p => p.name)
+}
+
 // Strips OTA-dominated lines from pasted content so the AI focuses on actual hotels.
 // Only activates when >15% of lines are pure OTA noise.
 function filterOTANoise(content: string): { filtered: string; otaRatio: number } {
@@ -163,6 +176,77 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
   }
   const data = await res.json()
   return ((data.results || []) as Array<{ url: string }>).map(r => r.url).filter(Boolean)
+}
+
+// SocialMediaSearchAgent — searches Google (via Tavily) for each lead's social media presence.
+// Merges results with any social media already detected from the website HTML.
+async function socialMediaSearchAgent(
+  leads: Array<Record<string, unknown>>,
+  tavilyKey: string,
+): Promise<Array<Record<string, unknown>>> {
+  const BATCH_SIZE = 3
+  const results: Array<Record<string, unknown>> = []
+
+  for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+    const batch = leads.slice(i, i + BATCH_SIZE)
+    const enriched = await Promise.all(batch.map(async (lead) => {
+      const name = (lead.company_name as string) || ""
+      const rawData = (lead.raw_data as Record<string, unknown>) || {}
+      const location = (rawData.location as string) || ""
+      if (!name) return lead
+
+      const query = `"${name}" ${location} facebook instagram tiktok`.trim()
+
+      try {
+        const res = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: tavilyKey,
+            query,
+            search_depth: "basic",
+            max_results: 10,
+            include_answer: false,
+          }),
+        })
+        if (!res.ok) return lead
+
+        const data = await res.json()
+        const resultUrls: string[] = ((data.results || []) as Array<{ url: string }>).map(r => r.url)
+        const resultContent: string = ((data.results || []) as Array<{ content?: string }>).map(r => r.content || "").join(" ").toLowerCase()
+
+        // Merge with social media found from website HTML
+        const htmlFound: string[] = (rawData.social_media_found as string[]) || []
+
+        const googleFound: string[] = []
+        for (const platform of SOCIAL_PLATFORMS) {
+          if (!htmlFound.includes(platform.name)) {
+            const inUrls = resultUrls.some(url => platform.domains.some(d => url.includes(d)))
+            const inContent = platform.domains.some(d => resultContent.includes(d))
+            if (inUrls || inContent) googleFound.push(platform.name)
+          }
+        }
+
+        const combinedFound = [...new Set([...htmlFound, ...googleFound])]
+        const missing = SOCIAL_PLATFORMS.filter(p => !combinedFound.includes(p.name)).map(p => p.name)
+
+        return {
+          ...lead,
+          raw_data: {
+            ...rawData,
+            social_media_found: combinedFound,
+            social_media_missing: missing,
+            social_media_google_checked: true,
+          },
+        }
+      } catch {
+        return lead
+      }
+    }))
+    results.push(...enriched)
+  }
+
+  return results
 }
 
 // GooglePlacesAgent — looks up each lead on Google Places to fetch phone, address, website
@@ -395,6 +479,10 @@ async function websiteCheckAgent(leads: Array<Record<string, unknown>>): Promise
         // Extract email + phone from HTML — only fill in if the AI didn't already find them
         const { email: scrapedEmail, phone: scrapedPhone } = extractContactsFromHtml(html)
 
+        // Detect social media links from the website HTML
+        const socialFound = detectSocialFromHtml(html)
+        const socialMissing = SOCIAL_PLATFORMS.filter(p => !socialFound.includes(p.name)).map(p => p.name)
+
         return {
           ...lead,
           email: (lead.email as string) || scrapedEmail || null,
@@ -402,6 +490,11 @@ async function websiteCheckAgent(leads: Array<Record<string, unknown>>): Promise
           website_signals: signals,
           website_status: isOutdated ? "outdated" : "ok",
           enrichment_source: isOutdated ? "outdated-website" : (lead.enrichment_source as string),
+          raw_data: {
+            ...(lead.raw_data as Record<string, unknown>),
+            social_media_found: socialFound,
+            social_media_missing: socialMissing,
+          },
         }
       } catch {
         return { ...lead, website_signals: ["website unreachable"], website_status: "unreachable", enrichment_source: "no-website" }
@@ -576,6 +669,16 @@ Deno.serve(async (req) => {
             send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Google Maps: looking up ${missingPhone} lead${missingPhone !== 1 ? "s" : ""} without phone...` })
             finalLeads = await googlePlacesAgent(finalLeads, googlePlacesKey)
           }
+        }
+
+        // Social media check: Google search via Tavily for every lead
+        const smTavilyKey = tavilyKey || Deno.env.get("TAVILY_API_KEY") || ""
+        if (smTavilyKey) {
+          send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Google search: checking social media presence for ${finalLeads.length} lead${finalLeads.length !== 1 ? "s" : ""}...` })
+          finalLeads = await socialMediaSearchAgent(finalLeads, smTavilyKey)
+          const withSocial = finalLeads.filter(l => ((l.raw_data as Record<string, unknown>)?.social_media_found as string[] || []).length > 0).length
+          const fullyMissing = finalLeads.filter(l => ((l.raw_data as Record<string, unknown>)?.social_media_missing as string[] || []).length === SOCIAL_PLATFORMS.length).length
+          send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Social media: ${withSocial} with presence · ${fullyMissing} with no social media found` })
         }
 
         const noWebsite = finalLeads.filter(l => l.website_status === "no-website").length
