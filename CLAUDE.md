@@ -1,9 +1,9 @@
 # LeadFlow AI — Claude Context
 
 ## What this project is
-AI-powered B2B lead generation platform. User searches, pastes, or provides URLs → 6-step pipeline extracts business contacts → AI writes personalized outreach emails → Google Maps auto-fills missing phone numbers.
+AI-powered B2B lead generation platform. User types a search query → Tavily finds relevant pages → 6-step pipeline extracts business contacts → AI writes personalized outreach emails → Google Maps auto-fills missing phones → social media check flags businesses with no Instagram/TikTok presence.
 
-Target market: Greek B2B (restaurants, catering, lawyers, dentists, hotels).
+Target market: Greek restaurants, cafes, tavernas, and pizzerias (social media management niche).
 Distribution: TikTok demos → DM-based sales.
 
 **Note:** TikTok content strategy (how to record, edit in CapCut, upload, etc.) is discussed separately in a browser Claude conversation — not Claude Code. Claude Code is only for app development tasks.
@@ -18,7 +18,7 @@ GitHub: https://github.com/doctoralex9/prospectflow-ai
 - **Database:** Supabase PostgreSQL with Row Level Security
 - **Auth:** Supabase Auth (email/password)
 - **Required API:** OpenAI (gpt-4o-mini for extraction, gpt-4o for outreach emails)
-- **Optional APIs:** Tavily (AI Search mode), Firecrawl (JS-rendered scraping), Google Places (phone enrichment)
+- **Optional APIs:** Tavily (AI Search — required for search mode), Google Places (phone enrichment)
 
 ## Supabase Project
 - URL: `https://ymxskdbmdwikzfzowznu.supabase.co`
@@ -33,7 +33,7 @@ src/
   pages/
     AuthPage.tsx          — email/password login + signup
     DashboardPage.tsx     — stats cards, pie/bar charts, recent pipeline runs
-    LeadsPage.tsx         — 3-tab input (URL/Paste/Search), pipeline progress (SSE), leads table, detail modal, export
+    LeadsPage.tsx         — AI Search input only, pipeline progress (SSE), leads table, detail modal, export; auto-creates default campaign on first load
     SettingsPage.tsx      — campaign CRUD, agent config editor, API Keys card, seed data
     ChatPage.tsx          — streaming AI assistant chat
   components/
@@ -48,7 +48,7 @@ src/
   types/
     database.ts           — DB type definitions
   data/
-    seedData.ts           — Athens Corporate Catering demo campaign + agent prompts
+    seedData.ts           — Default campaign: Greek Restaurants & Cafes (social media niche) + agent prompts; exported as DEFAULT_CAMPAIGN / DEFAULT_AGENT_CONFIGS (DEMO_* aliases kept for backwards compat)
 
 supabase/
   functions/
@@ -62,30 +62,23 @@ supabase/
 ---
 
 ## The 6-Step Pipeline
-1. **URL Input / Search** — user-provided URLs, pasted text, or Tavily search query
-2. **Crawler** — plain fetch + HTML stripping; Firecrawl if key present
+1. **AI Search** — Tavily searches the web for pages matching the user's query
+2. **Crawler** — plain fetch + HTML stripping
 3. **Filter** — pass-through
 4. **Extractor** — OpenAI gpt-4o-mini extracts leads as JSON
-5. **Enrichment** — website check (outdated signals) + optional Google Places phone lookup
+5. **Enrichment** — website check (outdated signals) + social media presence check (Instagram/TikTok) + optional Google Places phone lookup
 6. **Persistence** — upsert to DB, trigger outreach agent fire-and-forget
 
 ---
 
-## Three Input Modes (LeadsPage tabs)
+## Input Mode (LeadsPage)
 
-### By URL
-User pastes one or more URLs → pipeline crawls and extracts leads.
-- Firecrawl used if `leadflow_firecrawl_key` is in localStorage, else plain fetch.
-
-### Paste Content
-User opens any site in browser → Ctrl+A → Ctrl+C → pastes raw text.
-- Works on 100% of sites including JS-rendered ones.
-- OTA noise filter activates if >15% of lines are booking sites (hotels use case).
-
-### AI Search *(Tavily)*
-User types a plain-language query (e.g. "dentists in Athens") → Tavily finds relevant URLs → pipeline crawls and extracts leads.
+### AI Search (only mode)
+User types a plain-language query (e.g. "εστιατόρια Αθήνα χωρίς Instagram") → Tavily finds relevant URLs → pipeline crawls and extracts leads.
 - Requires `leadflow_tavily_key` in localStorage.
 - Tavily free tier: 1,000 searches/month.
+- Greek search suggestions shown in the UI as quick-fill chips.
+- URL/Paste modes have been removed to keep the flow simple.
 
 ---
 
@@ -95,13 +88,12 @@ All user-entered keys are stored in **localStorage** and passed in the pipeline 
 
 | Key | localStorage key | Used for |
 |-----|-----------------|----------|
-| Tavily | `leadflow_tavily_key` | AI Search mode |
-| Firecrawl | `leadflow_firecrawl_key` | JS-rendered page scraping in URL mode |
+| Tavily | `leadflow_tavily_key` | AI Search (required for pipeline to run) |
 | Google Places | `leadflow_google_places_key` | Auto-fetch phone/address for leads missing contact info |
 
 Settings → API Keys card → Save API Keys writes to localStorage.
 
-Edge function also falls back to Supabase env vars (`FIRECRAWL_API_KEY`, `GOOGLE_PLACES_API_KEY`, `TAVILY_API_KEY`) if body keys are absent.
+Edge function also falls back to Supabase env vars (`GOOGLE_PLACES_API_KEY`, `TAVILY_API_KEY`) if body keys are absent.
 
 ---
 
@@ -138,9 +130,9 @@ When a directory page is scraped (e.g. `cretehotels.gr/list`), the AI sometimes 
 ## APIs — Current Status
 
 - ✅ **OpenAI** — required, gpt-4o-mini + gpt-4o
-- ✅ **Tavily** — optional, AI Search mode, free tier
-- ✅ **Firecrawl** — optional, JS-rendered scraping, free tier
+- ✅ **Tavily** — required for search, free tier (1,000/month)
 - ✅ **Google Places** — optional, phone enrichment, $200/mo free credit
+- ❌ **Firecrawl** — removed (URL/Paste modes dropped)
 - ❌ **Perplexity AI** — removed
 - ❌ **Apollo.io** — removed
 
@@ -174,8 +166,8 @@ Permanent. `class="dark"` on `<html>` in `index.html`. Dark CSS variables are de
 Every code change must be manually redeployed:
 Supabase Dashboard → Edge Functions → [function name] → Edit → paste code → Deploy
 
-## Demo Campaign
-Settings → Load Sample Data → creates "Athens Corporate Catering Leads" with all 4 agent prompts pre-configured.
+## Default Campaign
+The app auto-creates the default campaign ("Greek Restaurants & Cafes") on first login — no manual setup needed. Agent configs are also upserted automatically to stay in sync with the latest defaults in seedData.ts.
 
 ---
 
@@ -195,4 +187,5 @@ Every time a code change is made, explain:
 - `.vscode/settings.json` configures Deno extension for the `supabase/functions/` folder
 - Pipeline SSE uses fetch-based reader (not EventSource) because EventSource only supports GET
 - Leads upsert on conflict `(campaign_id, company_name, source_url)` — no duplicates across runs
-- `googlePlacesKey` is passed from the frontend on every pipeline run (all 3 input modes), not just search
+- `googlePlacesKey` is passed from the frontend on every pipeline run
+- Social media check (Instagram/TikTok) runs in enrichment step; results stored in lead `raw_data` as `social_media_missing` / `social_media_present`; outreach agent uses these fields to tailor the pitch

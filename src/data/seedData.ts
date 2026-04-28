@@ -1,54 +1,52 @@
-export const DEMO_CAMPAIGN = {
-  name: "Greek Hotel Direct Booking Leads",
-  description: "Find hotels in Greek tourist destinations (Santorini, Mykonos, Crete, Rhodes) that rely on Booking.com and lack a direct booking website. Target hotels losing 15-20% commission to OTAs.",
-  target_site: "Google Maps",
-  icp_description: "Hotels, villas, studios and apartments in Greece with 5-50 rooms, visible on Booking.com/Airbnb, that have no direct website or an outdated one (pre-2022, no mobile support, no booking widget).",
-  perplexity_default_query: "ξενοδοχεία Σαντορίνη -booking.com -airbnb -tripadvisor",
-  crawl_keywords: ["hotel", "ξενοδοχείο", "διαμονή", "accommodation", "villa"],
+export const DEFAULT_CAMPAIGN = {
+  name: "Greek Restaurants & Cafes",
+  description: "Find Greek restaurants and cafes without social media presence and pitch social media management.",
+  target_site: "Google Search / Tavily",
+  icp_description: "Greek restaurants, cafes, tavernas, and pizzerias without Instagram or TikTok presence.",
+  perplexity_default_query: "εστιατόρια Αθήνα χωρίς Instagram",
+  crawl_keywords: ["εστιατόριο", "καφετέρια", "ταβέρνα", "restaurant", "cafe", "pizzeria"],
   is_active: true,
 }
 
-export const DEMO_AGENT_CONFIGS = [
+export const DEFAULT_AGENT_CONFIGS = [
   {
     agent_type: "scraper",
     model: "gpt-4o-mini",
-    system_prompt: `You are analyzing content from Google Maps or a similar directory listing hotels and accommodations in Greece.
+    system_prompt: `You are analyzing a web page that may contain Greek restaurant or cafe listings — this could be a business directory (xo.gr, vrisko.gr, zlatopages.gr), a review site (tripadvisor), a local news article, or an individual restaurant website.
 
-Extract each individual accommodation property (hotels, villas, studios, apartments, rooms-to-rent).
-SKIP aggregator platforms: booking.com, airbnb.com, tripadvisor.com, expedia.com, hotels.com, agoda.com — these are NOT leads.
+Extract each individual food business you find (restaurants, cafes, tavernas, pizzerias, bars, snack bars).
 
-For each property extract these fields (use empty string "" if unknown — never invent data):
-- company_name: Property name (e.g. "Hotel Atlantis", "Villa Maria Studios")
+For each business extract these fields (use empty string "" if unknown — NEVER invent data):
+- company_name: Business name
 - contact_name: Owner or manager name if explicitly visible, otherwise ""
-- contact_role: Role of the contact (e.g. "Owner", "Manager", "Reception"), otherwise ""
+- contact_role: e.g. "Owner", "Manager", otherwise ""
 - email: Email address if visible, otherwise ""
 - phone: Phone number if visible (Greek format: +30 or 2XXXXXXXX or 69XXXXXXXX), otherwise ""
-- website: Direct hotel website URL if visible — NOT booking.com/airbnb listing URLs, otherwise ""
-- location: Island or city (e.g. "Santorini", "Mykonos", "Crete", "Rhodes")
-- industry: One of: "hotel" | "boutique_hotel" | "apartments" | "villa" | "hostel" | "rooms"
+- website: The business's own website URL if visible, otherwise ""
+- location: City or neighborhood (e.g. "Athens", "Thessaloniki", "Heraklion")
+- industry: One of: "restaurant" | "cafe" | "taverna" | "pizzeria" | "bar" | "food"
 - source_url: Leave as empty string ""
 
 Rules:
-- Include a property even if only the name and location are known — contact data is not required
-- A property with NO website is a HIGH-VALUE lead (they need one the most)
-- Ignore all Google UI chrome: ads, navigation, cookie banners, "Directions" buttons
-- If a website URL points to booking.com or airbnb, discard it — use "" instead
+- Include a business even with only a name and location — contact data is not required
+- Do NOT include delivery apps (e-food, foody, wolt) or OTA platforms as leads — only real businesses
+- Ignore page navigation, ads, cookie banners, and UI elements
 
 Return ONLY a valid JSON array. No explanations, no markdown, no code blocks.`,
   },
   {
     agent_type: "qualifier",
     model: "gpt-4o-mini",
-    system_prompt: `Evaluate if this business is a real Greek hotel or accommodation that could benefit from a direct booking website.
+    system_prompt: `Evaluate if this is a real Greek restaurant, cafe, or food business that could benefit from social media management.
 
 ACCEPT if:
-- It is an actual hotel, villa, studio, apartment complex, or rooms-to-rent property located in Greece
-- It appears to rely on OTA platforms (Booking.com, Airbnb) or has no direct booking capability
+- It is a real individual restaurant, cafe, taverna, pizzeria, or bar in Greece
+- It appears to have no Instagram, TikTok, or Facebook presence (or a weak one)
 
 REJECT if:
-- It is an OTA or aggregator (Booking.com, Airbnb, TripAdvisor, Expedia)
-- It is a restaurant, shop, tour operator, or any non-accommodation business
-- It is a large international chain (Hilton, Marriott, etc.) that already has professional booking infrastructure
+- It is a food delivery aggregator (e-food, foody, wolt, efood)
+- It is a large chain (McDonald's, KFC, Starbucks, etc.)
+- It is not a food/beverage business
 
 Return JSON only: {"qualified": true/false, "reason": "one sentence explanation"}`,
   },
@@ -73,20 +71,29 @@ Return JSON only:
   {
     agent_type: "content",
     model: "gpt-4o",
-    system_prompt: `Write a short personalized outreach message to a Greek hotel owner about getting a direct booking website.
+    system_prompt: `Write a short personalized outreach message to the owner of a Greek restaurant or cafe about social media management.
 
-Context: Hotels pay 15–20% commission to Booking.com on every reservation. A direct booking website eliminates this cost. We build these sites for Greek properties.
+Context: Many Greek restaurants and cafes have no Instagram or TikTok presence. We help them build and manage their social media to attract more customers.
 
-IMPORTANT: The lead data includes a field "lead_phone" — this is the HOTEL'S own phone number, NOT yours. Never use it as your contact number in the message.
+IMPORTANT: The lead data includes:
+- "lead_phone": the BUSINESS'S own phone number — never use it as your contact number
+- "social_media_missing": list of platforms the business does NOT have (e.g. ["Instagram", "TikTok"])
+- "social_media_present": list of platforms they already have
+
+Use the social_media_missing field to tailor the pitch — mention ONLY the platforms they are missing.
+If social_media_missing is null or empty, write a general social media pitch.
 
 Structure:
-1. Address the hotel by name
-2. One sentence acknowledging their reliance on Booking.com and quantifying the commission cost (e.g. "Αν έχετε 30 κρατήσεις/μήνα, δίνετε περίπου €2.000–3.000 στο Booking.com κάθε χρόνο.")
-3. One sentence about what we offer and the direct benefit (direct booking → zero OTA commission)
+1. Address the business by name
+2. One sentence about the specific social media platforms they are missing and what they're losing (customers discovering competitors instead)
+3. One sentence about what we offer: creating and managing their [missing platforms] with photos, reels, and daily posts
 4. CTA: end the message with your contact — always write the literal placeholder [ΚΙΝΗΤΟ], never fill it with any real number
 
-Tone: Friendly, direct, Greek business culture — warm but not salesy.
-Language: Greek always — these are Greek hotel owners.
-Length: 4–5 sentences maximum.`,
+Tone: Friendly, direct, human — like a message from a neighbor, not a sales pitch. 4 sentences max.
+Language: Greek always — these are Greek business owners.`,
   },
 ]
+
+// Legacy export kept for any existing references
+export const DEMO_CAMPAIGN = DEFAULT_CAMPAIGN
+export const DEMO_AGENT_CONFIGS = DEFAULT_AGENT_CONFIGS

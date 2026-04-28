@@ -48,6 +48,9 @@ async function callAI(model: string, systemPrompt: string, userContent: string, 
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      const abort = new AbortController()
+      const timer = setTimeout(() => abort.abort(), 25000)
+
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -61,7 +64,8 @@ async function callAI(model: string, systemPrompt: string, userContent: string, 
             { role: "user", content: userContent.substring(0, 30000) },
           ],
         }),
-      })
+        signal: abort.signal,
+      }).finally(() => clearTimeout(timer))
 
       if (!response.ok) {
         const text = await response.text()
@@ -133,9 +137,20 @@ const SOCIAL_PLATFORMS = [
   { name: "YouTube", domains: ["youtube.com", "youtu.be"] },
 ]
 
+// Profile-link patterns — match only actual account URLs, not generic mentions or share buttons
+const SOCIAL_PROFILE_PATTERNS: Record<string, RegExp> = {
+  Instagram: /instagram\.com\/(?!p\/|reel\/|tv\/|stories\/|explore\/|accounts\/|_n\/)[a-zA-Z0-9_.]{3,}/i,
+  Facebook:  /facebook\.com\/(?!sharer|share\.php|dialog\/|plugins\/)[a-zA-Z0-9_.]{3,}/i,
+  TikTok:    /tiktok\.com\/@[a-zA-Z0-9_.]{3,}/i,
+  LinkedIn:  /linkedin\.com\/(?:company|in)\/[a-zA-Z0-9_-]{3,}/i,
+  YouTube:   /youtube\.com\/(?:channel\/|c\/|@)[a-zA-Z0-9_-]{3,}|youtu\.be\/[a-zA-Z0-9_-]{5,}/i,
+}
+
 function detectSocialFromHtml(html: string): string[] {
-  const lower = html.toLowerCase()
-  return SOCIAL_PLATFORMS.filter(p => p.domains.some(d => lower.includes(d))).map(p => p.name)
+  return SOCIAL_PLATFORMS.filter(p => {
+    const pattern = SOCIAL_PROFILE_PATTERNS[p.name]
+    return pattern ? pattern.test(html) : p.domains.some(d => html.toLowerCase().includes(d))
+  }).map(p => p.name)
 }
 
 // Strips OTA-dominated lines from pasted content so the AI focuses on actual hotels.
@@ -166,8 +181,13 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
       api_key: apiKey,
       query,
       search_depth: "basic",
-      max_results: 10,
+      max_results: 8,
       include_answer: false,
+      exclude_domains: [
+        "e-food.gr", "efood.gr", "foody.gr", "wolt.com",
+        "getir.com", "box.gr", "deliveras.gr",
+        "booking.com", "airbnb.com", "expedia.com",
+      ],
     }),
   })
   if (!res.ok) {
@@ -178,24 +198,33 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
   return ((data.results || []) as Array<{ url: string }>).map(r => r.url).filter(Boolean)
 }
 
-// SocialMediaSearchAgent — searches Google (via Tavily) for each lead's social media presence.
-// Merges results with any social media already detected from the website HTML.
+// InstagramSearchAgent — searches instagram.com directly (via Tavily include_domains) for each lead.
+// Only marks Instagram as confirmed when Tavily returns an actual profile URL (instagram.com/username).
+// Skips leads already confirmed from HTML detection.
 async function socialMediaSearchAgent(
   leads: Array<Record<string, unknown>>,
   tavilyKey: string,
 ): Promise<Array<Record<string, unknown>>> {
   const BATCH_SIZE = 3
+  // Must be a real profile URL — not a post, reel, story, or generic path
+  const INSTAGRAM_PROFILE = /instagram\.com\/(?!p\/|reel\/|tv\/|stories\/|explore\/|accounts\/)[a-zA-Z0-9_.]{3,}/i
   const results: Array<Record<string, unknown>> = []
 
   for (let i = 0; i < leads.length; i += BATCH_SIZE) {
     const batch = leads.slice(i, i + BATCH_SIZE)
     const enriched = await Promise.all(batch.map(async (lead) => {
-      const name = (lead.company_name as string) || ""
       const rawData = (lead.raw_data as Record<string, unknown>) || {}
-      const location = (rawData.location as string) || ""
+      const htmlFound: string[] = (rawData.social_media_found as string[]) || []
+
+      // Already confirmed from HTML — no need to search
+      if (htmlFound.includes("Instagram")) return lead
+
+      const name = (lead.company_name as string) || ""
       if (!name) return lead
 
-      const query = `"${name}" ${location} facebook instagram tiktok`.trim()
+      // location may be top-level on the lead or inside raw_data
+      const location = (lead.location as string) || (rawData.location as string) || ""
+      const query = location ? `${name} ${location}` : name
 
       try {
         const res = await fetch("https://api.tavily.com/search", {
@@ -205,36 +234,28 @@ async function socialMediaSearchAgent(
             api_key: tavilyKey,
             query,
             search_depth: "basic",
-            max_results: 10,
+            max_results: 5,
             include_answer: false,
+            include_domains: ["instagram.com"], // force results to come from Instagram itself
           }),
         })
         if (!res.ok) return lead
 
         const data = await res.json()
         const resultUrls: string[] = ((data.results || []) as Array<{ url: string }>).map(r => r.url)
-        const resultContent: string = ((data.results || []) as Array<{ content?: string }>).map(r => r.content || "").join(" ").toLowerCase()
 
-        // Merge with social media found from website HTML
-        const htmlFound: string[] = (rawData.social_media_found as string[]) || []
+        // Only flag Instagram if at least one result is a proper profile URL
+        const hasInstagram = resultUrls.some(url => INSTAGRAM_PROFILE.test(url))
+        if (!hasInstagram) return lead
 
-        const googleFound: string[] = []
-        for (const platform of SOCIAL_PLATFORMS) {
-          if (!htmlFound.includes(platform.name)) {
-            const inUrls = resultUrls.some(url => platform.domains.some(d => url.includes(d)))
-            const inContent = platform.domains.some(d => resultContent.includes(d))
-            if (inUrls || inContent) googleFound.push(platform.name)
-          }
-        }
-
-        const combinedFound = [...new Set([...htmlFound, ...googleFound])]
-        const missing = SOCIAL_PLATFORMS.filter(p => !combinedFound.includes(p.name)).map(p => p.name)
+        const combined = [...new Set([...htmlFound, "Instagram"])]
+        const missing = SOCIAL_PLATFORMS.filter(p => !combined.includes(p.name)).map(p => p.name)
 
         return {
           ...lead,
           raw_data: {
             ...rawData,
-            social_media_found: combinedFound,
+            social_media_found: combined,
             social_media_missing: missing,
             social_media_google_checked: true,
           },
@@ -356,7 +377,8 @@ async function qualifierAgent(
         const raw = await callAI(
           scraperConfig.model,
           scraperConfig.system_prompt + mandatoryFields,
-          `URL: ${page.url}\n\nContent:\n${page.content}`
+          `URL: ${page.url}\n\nContent:\n${page.content}`,
+          0
         )
 
         // Try to extract JSON array from response — handle markdown code blocks too
@@ -671,14 +693,30 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Social media check: Google search via Tavily for every lead
+        // Tavily Instagram search — only for leads not already confirmed from HTML.
+        // Uses include_domains:["instagram.com"] so results come from Instagram itself.
         const smTavilyKey = tavilyKey || Deno.env.get("TAVILY_API_KEY") || ""
         if (smTavilyKey) {
-          send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Google search: checking social media presence for ${finalLeads.length} lead${finalLeads.length !== 1 ? "s" : ""}...` })
-          finalLeads = await socialMediaSearchAgent(finalLeads, smTavilyKey)
-          const withSocial = finalLeads.filter(l => ((l.raw_data as Record<string, unknown>)?.social_media_found as string[] || []).length > 0).length
-          const fullyMissing = finalLeads.filter(l => ((l.raw_data as Record<string, unknown>)?.social_media_missing as string[] || []).length === SOCIAL_PLATFORMS.length).length
-          send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Social media: ${withSocial} with presence · ${fullyMissing} with no social media found` })
+          const needsCheck = finalLeads.filter(l => {
+            const found = ((l.raw_data as Record<string, unknown>)?.social_media_found as string[]) || []
+            return !found.includes("Instagram")
+          }).length
+          if (needsCheck > 0) {
+            send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Instagram check: searching ${needsCheck} lead${needsCheck !== 1 ? "s" : ""} on Instagram...` })
+            finalLeads = await socialMediaSearchAgent(finalLeads, smTavilyKey)
+          }
+        }
+
+        // Drop leads that have a confirmed Instagram presence (actual profile link in their website HTML
+        // or a real instagram.com/username URL returned by Tavily).
+        const beforeFilter = finalLeads.length
+        finalLeads = finalLeads.filter(lead => {
+          const found = ((lead.raw_data as Record<string, unknown>)?.social_media_found as string[]) || []
+          return !found.includes("Instagram")
+        })
+        const dropped = beforeFilter - finalLeads.length
+        if (dropped > 0) {
+          send(controller, "step", { step: 5, name: "EnrichmentAgent", status: "running", message: `Filtered out ${dropped} lead${dropped !== 1 ? "s" : ""} with confirmed Instagram · ${finalLeads.length} remaining` })
         }
 
         const noWebsite = finalLeads.filter(l => l.website_status === "no-website").length

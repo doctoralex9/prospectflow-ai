@@ -2,11 +2,10 @@ import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/useAuth"
-import type { Campaign, ScrapeJob } from "@/types/database"
+import type { ScrapeJob } from "@/types/database"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
 import {
   Users, Mail, Phone, Clock, CheckCircle2, XCircle, Loader2,
@@ -27,8 +26,7 @@ const COLORS = ["#294551", "#528ba3", "#393B81", "#754195", "#D1B8E0"]
 export default function DashboardPage() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all")
+  const selectedCampaignId = "all"
   const [stats, setStats] = useState<LeadStats | null>(null)
   const [recentJobs, setRecentJobs] = useState<(ScrapeJob & { campaigns?: { name: string } })[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,25 +46,12 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => {
-    if (user) {
-      loadCampaigns()
-      loadRecentJobs()
-    }
+    if (user) loadRecentJobs()
   }, [user])
 
   useEffect(() => {
     if (user) loadStats()
   }, [user, selectedCampaignId])
-
-  async function loadCampaigns() {
-    const { data } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("user_id", user!.id)
-      .eq("is_active", true)
-      .order("created_at", { ascending: false })
-    if (data) setCampaigns(data)
-  }
 
   async function loadStats() {
     setLoading(true)
@@ -227,9 +212,9 @@ export default function DashboardPage() {
         {/* How it works */}
         <div className="relative z-10 mt-16 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto w-full">
           {[
-            { step: "01", title: "Search or Paste", desc: "Use AI Search, paste URLs, or drop raw text from any website" },
-            { step: "02", title: "AI Extracts", desc: "6-step pipeline pulls business names, emails, and phones automatically" },
-            { step: "03", title: "Send Outreach", desc: "Personalized messages written by AI, ready to send in seconds" },
+            { step: "01", title: "AI Search", desc: "Type a query — Tavily finds the right businesses across the web" },
+            { step: "02", title: "Extract & Enrich", desc: "Pipeline pulls contacts, checks websites, and scans Google for social media gaps" },
+            { step: "03", title: "Send Outreach", desc: "Personalized messages targeting exactly what each business is missing" },
           ].map(item => (
             <div
               key={item.step}
@@ -254,22 +239,9 @@ export default function DashboardPage() {
       <section className="min-h-screen flex flex-col justify-center px-6 py-20 bg-[#04060f] relative overflow-hidden">
         <StarField />
         <div className="relative z-10 max-w-4xl mx-auto w-full space-y-10">
-          <div className="flex items-end justify-between flex-wrap gap-4">
-            <div>
-              <p className="text-xs font-mono text-primary uppercase tracking-widest">Your Numbers</p>
-              <h2 className="text-3xl font-bold mt-1">Pipeline Overview</h2>
-            </div>
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-              <SelectTrigger className="w-52 bg-card/40 backdrop-blur-sm border-white/10">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Campaigns</SelectItem>
-                {campaigns.map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div>
+            <p className="text-xs font-mono text-primary uppercase tracking-widest">Your Numbers</p>
+            <h2 className="text-3xl font-bold mt-1">Pipeline Overview</h2>
           </div>
 
           {loading ? (
