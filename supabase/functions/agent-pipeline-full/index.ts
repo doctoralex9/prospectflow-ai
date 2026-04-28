@@ -87,19 +87,6 @@ function send(controller: ReadableStreamDefaultController, event: string, data: 
   controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
 }
 
-async function fetchWithFirecrawl(url: string, apiKey: string): Promise<string> {
-  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ url, formats: ["markdown"] }),
-  })
-  if (!res.ok) throw new Error(`Firecrawl HTTP ${res.status}`)
-  const data = await res.json()
-  return (data?.data?.markdown as string) || ""
-}
 
 async function fetchWithPlainFetch(url: string): Promise<string> {
   const controller = new AbortController()
@@ -224,7 +211,18 @@ async function socialMediaSearchAgent(
 
       // location may be top-level on the lead or inside raw_data
       const location = (lead.location as string) || (rawData.location as string) || ""
-      const query = location ? `${name} ${location}` : name
+
+      // Add the website domain to the query so Tavily can find the Instagram profile
+      // even when the business uses a different handle than its name
+      // (e.g. website "tavernakostas.gr" → handle "@taverna_by_kostas")
+      const website = (lead.website as string) || (rawData.website as string) || ""
+      let websiteDomain = ""
+      try { if (website) websiteDomain = new URL(website).hostname.replace(/^www\./, "") } catch { /* */ }
+
+      const queryParts: string[] = [name]
+      if (location) queryParts.push(location)
+      if (websiteDomain) queryParts.push(websiteDomain)
+      const query = queryParts.join(" ")
 
       try {
         const res = await fetch("https://api.tavily.com/search", {
@@ -327,8 +325,8 @@ async function googlePlacesAgent(
   return results
 }
 
-// CrawlerAgent — tries Firecrawl (JS-rendered sites) if key provided, falls back to plain fetch
-async function crawlerAgent(urls: string[], firecrawlKey?: string): Promise<Array<{ url: string; content: string }>> {
+// CrawlerAgent — fetches and strips HTML from each URL
+async function crawlerAgent(urls: string[]): Promise<Array<{ url: string; content: string }>> {
   const results: Array<{ url: string; content: string }> = []
   const BATCH_SIZE = 5
 
@@ -336,16 +334,6 @@ async function crawlerAgent(urls: string[], firecrawlKey?: string): Promise<Arra
     const batch = urls.slice(i, i + BATCH_SIZE)
     const batchResults = await Promise.all(batch.map(async (url) => {
       let content = ""
-
-      if (firecrawlKey) {
-        try {
-          content = await fetchWithFirecrawl(url, firecrawlKey)
-          if (content.length > 20) return { url, content: content.substring(0, 25000) }
-          console.warn(`Firecrawl returned empty for ${url}, falling back`)
-        } catch (e) {
-          console.error(`Firecrawl failed for ${url}:`, e)
-        }
-      }
 
       try {
         content = await fetchWithPlainFetch(url)
@@ -561,7 +549,6 @@ Deno.serve(async (req) => {
   let rawContent: string | undefined
   let searchQuery: string | undefined
   let tavilyKey: string | undefined
-  let firecrawlKey: string | undefined
   let googlePlacesKey: string | undefined
 
   try {
@@ -571,7 +558,6 @@ Deno.serve(async (req) => {
     rawContent = body.rawContent as string | undefined
     searchQuery = body.searchQuery as string | undefined
     tavilyKey = body.tavilyKey as string | undefined
-    firecrawlKey = (body.firecrawlKey as string | undefined) || Deno.env.get("FIRECRAWL_API_KEY") || undefined
     googlePlacesKey = (body.googlePlacesKey as string | undefined) || Deno.env.get("GOOGLE_PLACES_API_KEY") || undefined
     if (!campaignId) throw new Error("campaign_id required")
     if (!rawContent && !urls.length && !searchQuery) throw new Error("urls, rawContent, or searchQuery required")
@@ -617,6 +603,10 @@ Deno.serve(async (req) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        // Wipe leads from previous runs — guarantees the table only contains
+        // results from this run and never shows stale leads with social media
+        await supabase.from("leads").delete().eq("campaign_id", campaignId)
+
         // Steps 1 & 2: handle three input modes
         let pages: Array<{ url: string; content: string }>
 
@@ -640,7 +630,7 @@ Deno.serve(async (req) => {
           send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `Found ${foundUrls.length} result${foundUrls.length !== 1 ? "s" : ""} for "${searchQuery}"` })
 
           send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${foundUrls.length} page${foundUrls.length !== 1 ? "s" : ""}...` })
-          pages = await crawlerAgent(foundUrls, firecrawlKey)
+          pages = await crawlerAgent(foundUrls)
           if (!pages.length) {
             send(controller, "error", { message: "Could not scrape any of the found pages. Try a different query." })
             await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped from search results" }).eq("id", jobId)
@@ -660,8 +650,8 @@ Deno.serve(async (req) => {
         } else {
           // URL mode — crawl provided URLs
           send(controller, "step", { step: 1, name: "URLInput", status: "done", message: `${urls.length} URL${urls.length !== 1 ? "s" : ""} ready to process` })
-          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""} ${firecrawlKey ? "via Firecrawl" : "(plain fetch)"}...` })
-          pages = await crawlerAgent(urls, firecrawlKey)
+          send(controller, "step", { step: 2, name: "CrawlerAgent", status: "running", message: `Scraping ${urls.length} page${urls.length !== 1 ? "s" : ""}` })
+          pages = await crawlerAgent(urls)
           if (pages.length === 0) {
             send(controller, "error", { message: "Could not scrape any pages. Check that the URLs are publicly accessible." })
             await supabase.from("scrape_jobs").update({ status: "failed", error_message: "No pages scraped" }).eq("id", jobId)
