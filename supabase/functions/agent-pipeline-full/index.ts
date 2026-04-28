@@ -160,21 +160,18 @@ function isSameDomain(a: string, b: string): boolean {
   try { return new URL(a).hostname === new URL(b).hostname } catch { return false }
 }
 
-functon filterDirectoryUrl(urls: string:[]): string {
-  const LISTING_SEGMENTS = /\/(restaurants?|cafes?|bars?|tavernas?|se
-  arch|results?|list|category|tag|article|blog|news|top|best|guide)\//i
-    const filtered = urls.filter(url => {
-      try {
-        const u = new URL(url)
-        const segments = u.pathname.split("/". filter(Boolean))
-        if (segments.length > 2) return false
-        if (LISTING_SEGMENTS.test(u.pathname)) return false
-        return true
-      } catch {return false}
-    })
-    // if the filter removed everything, fall back to original
-    //so the pipeline never silently breaks
-    return filtered.length > 0 ? filtered : urls
+function filterDirectoryUrls(urls: string[]): string[] {
+  const LISTING_SEGMENTS = /\/(restaurants?|cafes?|bars?|tavernas?|search|results?|list|category|tag|article|blog|news|top|best|guide)\//i
+  const filtered = urls.filter(url => {
+    try {
+      const u = new URL(url)
+      const segments = u.pathname.split("/").filter(Boolean)
+      if (segments.length > 2) return false
+      if (LISTING_SEGMENTS.test(u.pathname)) return false
+      return true
+    } catch { return false }
+  })
+  return filtered.length > 0 ? filtered : urls
 }
 
 async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
@@ -183,7 +180,7 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       api_key: apiKey,
-      query: `${query} επικοινωνία τηλέφωνο`
+      query: `${query} επικοινωνία τηλέφωνο`,
       search_depth: "basic",
       max_results: 8,
       include_answer: false,
@@ -383,7 +380,6 @@ async function qualifierAgent(
           scraperConfig.model,
           scraperConfig.system_prompt + mandatoryFields,
           `URL: ${page.url}\n\nContent:\n${page.content}`,
-          0
         )
 
         // Try to extract JSON array from response — handle markdown code blocks too
@@ -637,7 +633,7 @@ Deno.serve(async (req) => {
             controller.close()
             return
           }
-          const foundUrls = await tavilySearch(await tavilySearch(searchQuery, apiKey))
+          const foundUrls = filterDirectoryUrls(await tavilySearch(searchQuery, apiKey))
           if (!foundUrls.length) {
             send(controller, "error", { message: `No results found for "${searchQuery}". Try a different search query.` })
             await supabase.from("scrape_jobs").update({ status: "failed", error_message: "Tavily returned no results" }).eq("id", jobId)
