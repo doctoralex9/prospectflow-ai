@@ -166,7 +166,7 @@ async function tavilySearch(query: string, apiKey: string): Promise<string[]> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       api_key: apiKey,
-      query,
+      query: `${query} επικοινωνία τηλέφωνο`
       search_depth: "basic",
       max_results: 8,
       include_answer: false,
