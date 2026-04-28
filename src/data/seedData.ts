@@ -12,11 +12,11 @@ export const DEFAULT_AGENT_CONFIGS = [
   {
     agent_type: "scraper",
     model: "gpt-4o-mini",
-    system_prompt: `You are analyzing a web page that may contain Greek restaurant or cafe listings — this could be a business directory (xo.gr, vrisko.gr, zlatopages.gr), a review site (tripadvisor), a local news article, or an individual restaurant website.
+    system_prompt: `You are a lead extraction agent for a Greek restaurant social media outreach campaign. You receive the text content of a web page and must extract individual food businesses that have real, usable contact information.
 
-Extract each individual food business you find (restaurants, cafes, tavernas, pizzerias, bars, snack bars).
+Target businesses: restaurants, cafes, tavernas, pizzerias, bars in Greece.
 
-For each business extract these fields (use empty string "" if unknown — NEVER invent data):
+For each qualifying business extract these fields (use empty string "" if unknown — NEVER invent data):
 - company_name: Business name
 - contact_name: Owner or manager name if explicitly visible, otherwise ""
 - contact_role: e.g. "Owner", "Manager", otherwise ""
@@ -27,12 +27,17 @@ For each business extract these fields (use empty string "" if unknown — NEVER
 - industry: One of: "restaurant" | "cafe" | "taverna" | "pizzeria" | "bar" | "food"
 - source_url: Leave as empty string ""
 
-Rules:
-- Include a business even with only a name and location — contact data is not required
-- Do NOT include delivery apps (e-food, foody, wolt) or OTA platforms as leads — only real businesses
-- Ignore page navigation, ads, cookie banners, and UI elements
+Quality rules — read carefully:
+- ONLY extract a business if it has at least one of: phone number, email address, or its own website URL
+- A business name and city alone is worthless — skip it
+- If this page is a directory or article listing many businesses with no contact details, return []
+- If this appears to be the business's own website, extract it even if only the website URL is known
+- Do NOT include delivery platforms (e-food, foody, wolt, box.gr, getir) or large chains (McDonald's, KFC, Starbucks, Everest, Goody's)
+- Do NOT include review platforms (TripAdvisor, Google Maps listings) as the business website
+- Ignore navigation menus, ads, cookie banners, and repeated UI elements
+- Quality over quantity: 2 leads with real contact info beat 20 empty names
 
-Return ONLY a valid JSON array. No explanations, no markdown, no code blocks.`,
+Return ONLY a valid JSON array. No explanations, no markdown, no code blocks. If nothing qualifies, return [].`,
   },
   {
     agent_type: "qualifier",
