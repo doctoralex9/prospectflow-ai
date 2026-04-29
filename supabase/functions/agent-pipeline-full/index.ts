@@ -160,6 +160,89 @@ function isSameDomain(a: string, b: string): boolean {
   try { return new URL(a).hostname === new URL(b).hostname } catch { return false }
 }
 
+// Greek → Latin transliteration so we can compare Greek business names to Latin Instagram handles
+const GREEK_TO_LATIN: Record<string, string> = {
+  α:"a",ά:"a",β:"v",γ:"g",δ:"d",ε:"e",έ:"e",ζ:"z",η:"i",ή:"i",θ:"th",
+  ι:"i",ί:"i",ϊ:"i",ΐ:"i",κ:"k",λ:"l",μ:"m",ν:"n",ξ:"x",ο:"o",ό:"o",
+  π:"p",ρ:"r",σ:"s",ς:"s",τ:"t",υ:"y",ύ:"y",ϋ:"y",ΰ:"y",φ:"f",χ:"h",
+  ψ:"ps",ω:"o",ώ:"o",
+}
+
+function toLatinTokens(text: string): string[] {
+  const latin = text.toLowerCase().split("").map(c => GREEK_TO_LATIN[c] ?? c).join("")
+  return latin.replace(/[^a-z0-9]/g, " ").trim().split(/\s+/).filter(t => t.length >= 4)
+}
+
+// Both Greek and English spellings of major cities + popular Athens neighborhoods.
+// Needed because lead.location comes from the AI (usually English) but Instagram bios
+// are often in Greek — and Greek transliteration ≠ English name (Αθήνα → "athina" ≠ "athens").
+const CITY_ALIASES: Record<string, string[]> = {
+  athens:       ["athens", "αθηνα", "αθήνα", "attica", "αττικη", "αττική"],
+  thessaloniki: ["thessaloniki", "θεσσαλονικη", "θεσσαλονίκη", "salonica", "salonika"],
+  heraklion:    ["heraklion", "herakleio", "iraklion", "ηρακλειο", "ηράκλειο"],
+  piraeus:      ["piraeus", "πειραιας", "πειραιάς", "pireus"],
+  patras:       ["patras", "πατρα", "πάτρα"],
+  larissa:      ["larissa", "larisa", "λαρισα", "λάρισα"],
+  volos:        ["volos", "βολος", "βόλος"],
+  ioannina:     ["ioannina", "ιωαννινα", "ιωάννινα", "janina"],
+  chania:       ["chania", "hania", "χανια", "χανιά"],
+  rhodes:       ["rhodes", "ροδος", "ρόδος"],
+  corfu:        ["corfu", "κερκυρα", "κέρκυρα"],
+  kavala:       ["kavala", "καβαλα", "καβάλα"],
+  // Athens neighbourhoods (common in bios)
+  kolonaki:     ["kolonaki", "κολωνακι", "κολωνάκι"],
+  glyfada:      ["glyfada", "γλυφαδα", "γλυφάδα"],
+  kifisia:      ["kifisia", "kifissia", "κηφισια", "κηφισιά"],
+  marousi:      ["marousi", "μαρουσι", "μαρούσι"],
+  kallithea:    ["kallithea", "καλλιθεα", "καλλιθέα"],
+  pagkrati:     ["pagkrati", "pangrati", "παγκρατι", "παγκράτι"],
+  peristeri:    ["peristeri", "περιστερι", "περιστέρι"],
+  halandri:     ["halandri", "χαλανδρι", "χαλάνδρι"],
+}
+
+// Returns all terms (Greek + English + transliterated) that identify a city in a bio snippet.
+function getCitySearchTerms(cityName: string): string[] {
+  const key = cityName.toLowerCase().replace(/[^a-z]/g, "")
+  const terms = new Set<string>([cityName.toLowerCase()])
+  // Match against alias table — try key directly or check if any alias contains the key
+  for (const aliases of Object.values(CITY_ALIASES)) {
+    if (aliases.some(a => a.replace(/[^a-z]/g, "") === key)) {
+      aliases.forEach(a => terms.add(a.toLowerCase()))
+      break
+    }
+  }
+  // Also add transliterated tokens as fallback for cities not in the table
+  toLatinTokens(cityName).forEach(t => terms.add(t))
+  return [...terms]
+}
+
+// Returns true if the Instagram handle contains at least one meaningful token
+// from the business name (transliterated) or the website domain.
+function handleMatchesBusiness(handle: string, businessName: string, websiteDomain: string): boolean {
+  const normHandle = handle.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const nameTokens = toLatinTokens(businessName)
+  // Greek υ/ου → "y" in our transliteration, but Instagram handles use "u" (e.g. "koytsoyro" vs "koutsourokol").
+  const matchesHandle = (t: string) => normHandle.includes(t) || normHandle.includes(t.replace(/y/g, "u"))
+  if (nameTokens.some(matchesHandle)) return true
+  if (websiteDomain) {
+    const domainBase = websiteDomain.replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, "")
+    if (domainBase.length >= 4 && (normHandle.includes(domainBase) || normHandle.includes(domainBase.replace(/y/g, "u")))) return true
+  }
+  return false
+}
+
+// Returns true if the Instagram handle contains the city name in any alias form.
+// Catches "namelocation" style handles like "pizzaathina" or "tavernaathens".
+function handleContainsCity(handle: string, location: string): boolean {
+  if (!location) return false
+  const normHandle = handle.toLowerCase().replace(/[^a-z0-9]/g, "")
+  return getCitySearchTerms(location).some(term => {
+    const normTerm = term.replace(/[^a-z0-9]/g, "")
+    return normTerm.length >= 4 && normHandle.includes(normTerm)
+  })
+}
+
+
 function filterDirectoryUrls(urls: string[]): string[] {
   const LISTING_SEGMENTS = /\/(restaurants?|cafes?|bars?|tavernas?|search|results?|list|category|tag|article|blog|news|top|best|guide)\//i
   const filtered = urls.filter(url => {
@@ -254,11 +337,40 @@ async function socialMediaSearchAgent(
         if (!res.ok) return lead
 
         const data = await res.json()
-        const resultUrls: string[] = ((data.results || []) as Array<{ url: string }>).map(r => r.url)
+        const resultItems: Array<{ url: string; content?: string; title?: string }> = (data.results || [])
 
-        // Only flag Instagram if at least one result is a proper profile URL
-        const hasInstagram = resultUrls.some(url => INSTAGRAM_PROFILE.test(url))
-        if (!hasInstagram) return lead
+        // Find a result that passes both an identity check and a location check:
+        //
+        // IDENTITY (required): handle must contain meaningful tokens from the business name.
+        //   Generic words (cafe, taverna, pizza) are not tokens — they must come from
+        //   the specific business name or website domain.
+        //
+        // LOCATION (checked only when snippet is available):
+        //   City must appear in the bio snippet OR in the handle itself
+        //   ("namelocation" handles like "tavernakostas_athens" contain the city).
+        const matchedItem = resultItems.find(item => {
+          const url = item.url || ""
+          if (!INSTAGRAM_PROFILE.test(url)) return false
+          const handleMatch = url.match(/instagram\.com\/([a-zA-Z0-9_.]{3,})/)
+          if (!handleMatch) return false
+          const handle = handleMatch[1]
+
+          // Identity: handle must match the business name — required, no fallback
+          if (!handleMatchesBusiness(handle, name, websiteDomain)) return false
+
+          // Location: when bio snippet is available, city must be in the bio or the handle
+          if (location && item.content && item.content.length > 10) {
+            const cityInBio = getCitySearchTerms(location).some(term =>
+              (item.content as string).toLowerCase().includes(term)
+            )
+            const cityInHandle = handleContainsCity(handle, location)
+            if (!cityInBio && !cityInHandle) return false
+          }
+
+          return true
+        })
+
+        if (!matchedItem) return lead
 
         const combined = [...new Set([...htmlFound, "Instagram"])]
         const missing = SOCIAL_PLATFORMS.filter(p => !combined.includes(p.name)).map(p => p.name)
@@ -270,6 +382,7 @@ async function socialMediaSearchAgent(
             social_media_found: combined,
             social_media_missing: missing,
             social_media_google_checked: true,
+            instagram_url: matchedItem.url,
           },
         }
       } catch {

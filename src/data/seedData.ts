@@ -34,6 +34,7 @@ Quality rules — read carefully:
 - If this appears to be the business's own website, extract it even if only the website URL is known
 - Do NOT include delivery platforms (e-food, foody, wolt, box.gr, getir) or large chains (McDonald's, KFC, Starbucks, Everest, Goody's)
 - Do NOT include review platforms (TripAdvisor, Google Maps listings) as the business website
+- Do NOT include product sellers, online shops, coffee equipment retailers, food wholesalers, or distributors — only physical venues where customers sit and eat or drink on the premises
 - Ignore navigation menus, ads, cookie banners, and repeated UI elements
 - Quality over quantity: 2 leads with real contact info beat 20 empty names
 
